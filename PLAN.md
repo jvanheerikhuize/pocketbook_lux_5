@@ -26,6 +26,17 @@ changed) and gives root SSH (USB-net `169.254.0.1` or Wi-Fi; needs
 scripts lose their immutable flag first. Reported working on FW 6.x; the PB628
 on 6.9 is unconfirmed.
 
+### Probe results (2026-11-01, [docs/FACTS.md](docs/FACTS.md))
+
+- Apps run as `reader`, not root; input devices are not writable → driving
+  the reader outside an app still needs PBJB (T2).
+- `/dev/fb0` **is** readable by apps and shows the whole firmware UI (landscape
+  buffer, turn 90° CW) → whole-screen *watching* works without root. Next:
+  a `fbshot` agent command so screenshots include InkView dialogs, the
+  on-screen keyboard and firmware overlays, not only the app canvas.
+- `/sbin/dropbear` ships with the firmware → a user-level SSH shell on a high
+  port from an `.app` is worth a test before reaching for PBJB.
+
 ## Phases
 
 1. **Facts** — `device/probe`: a shell-only app (no compiler) recording who apps

@@ -72,6 +72,11 @@ def collect(usb: UsbStorage) -> dict:
         if w and h:
             visible_h = min(h, len(raw) // stride) if stride else 0
             img = from_framebuffer(raw, w, visible_h, bpp, stride)
+            # PB628: fb0 is 1024x758 landscape for a portrait panel (confirmed
+            # 2026-11-01, firmware UI dump reads correctly after a CW turn).
+            if img.width > img.height:
+                img = img.rotate_cw()
+                report["framebuffer_rotated"] = "cw90"
             png = out_dir / "fb0.png"
             png.write_bytes(img.png())
             report["framebuffer_png"] = str(png)
@@ -86,7 +91,9 @@ def collect(usb: UsbStorage) -> dict:
 def interpret(f: dict[str, str]) -> dict:
     r: dict = {}
     r["runs_as_root"] = f.get("user.uid") == "0"
-    r["firmware"] = f.get("sys.firmware") or "?"
+    r["firmware"] = f.get("sys.firmware") or "(no version file; `pbtk info` shows it)"
+    r["user"] = f.get("user.name")
+    r["dropbear_binary"] = f.get("tool.dropbear") or None
     r["kernel"] = f.get("sys.kernel")
     r["framebuffer"] = {
         "readable": f.get("fb.readable") == "1",
@@ -129,7 +136,8 @@ def summary(result: dict) -> str:
     yes = lambda b: "yes" if b else "no"  # noqa: E731
     lines = [
         f"firmware          {r['firmware']}  (kernel {r.get('kernel')})",
-        f"apps run as root  {yes(r['runs_as_root'])}",
+        f"apps run as root  {yes(r['runs_as_root'])} (user {r.get('user')})",
+        f"dropbear binary   {r.get('dropbear_binary') or 'no'}",
         f"/dev/fb0          readable={yes(r['framebuffer']['readable'])} "
         f"writable={yes(r['framebuffer']['writable'])} size={r['framebuffer']['size']} "
         f"bpp={r['framebuffer']['bpp']} stride={r['framebuffer']['stride']}",
@@ -149,6 +157,10 @@ def summary(result: dict) -> str:
     if t["system_wide_screenshots_without_root"] and t["system_wide_input_without_root"]:
         lines.append("  apps can already see the whole screen and inject input: a daemon started from an")
         lines.append("  .app could control the reader outside apps too, without PBJB.")
+    elif t["system_wide_screenshots_without_root"]:
+        lines.append("  apps can read the whole screen (/dev/fb0) but cannot inject input outside")
+        lines.append("  themselves: whole-reader *watching* works without root, *driving* stays in")
+        lines.append("  apps that link libpbagent (T1).")
     else:
         lines.append("  without root, control is limited to apps that link libpbagent (T1).")
     if not t["T2_root_ssh"]:

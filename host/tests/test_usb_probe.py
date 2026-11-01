@@ -27,6 +27,13 @@ class ImageTest(unittest.TestCase):
         idat = png[png.index(b"IDAT") + 4 : png.index(b"IEND") - 8]
         self.assertEqual(zlib.decompress(idat), b"\x00\x00\x80\xff\x00\x0a\x14\x1e")
 
+    def test_rotate_cw(self):
+        # 3x2:  a b c      rotated:  d a
+        #       d e f                e b
+        #                            f c
+        g = Gray(3, 2, b"abcdef").rotate_cw()
+        self.assertEqual((g.width, g.height, g.pixels), (2, 3, b"daebfc"))
+
     def test_framebuffer_formats(self):
         self.assertEqual(from_framebuffer(bytes([1, 2, 0, 3, 4, 0]), 2, 2, 8, 3).pixels, bytes([1, 2, 3, 4]))
         white32 = bytes([255, 255, 255, 0]) * 2

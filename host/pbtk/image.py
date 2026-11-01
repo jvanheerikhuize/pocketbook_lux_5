@@ -21,6 +21,16 @@ class Gray:
     def png(self) -> bytes:
         return png_gray(self.width, self.height, self.pixels)
 
+    def rotate_cw(self) -> "Gray":
+        """Rotate 90° clockwise (the PB628 stores its portrait panel landscape)."""
+        w, h, src = self.width, self.height, self.pixels
+        out = bytearray(w * h)
+        for ny in range(w):  # new height = old width
+            row = ny * h
+            for nx in range(h):  # new width = old height
+                out[row + nx] = src[(h - 1 - nx) * w + ny]
+        return Gray(h, w, bytes(out))
+
 
 def parse_pgm(data: bytes) -> Gray:
     """Parse a binary (P5) PGM with maxval 255, as the agent sends."""
