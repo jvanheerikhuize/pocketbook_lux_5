@@ -35,6 +35,8 @@
 #define MAX_CLIENTS 4
 #define QUEUE_LEN 128
 #define OBSERVED_LEN 256
+#define INJECTED_LEN 128
+#define INJECTED_MATCH_MS 3000
 #define LINE_MAX_LEN 1024
 #define BEACON_MS 3000
 #define TICK_ACTIVE_MS 30
@@ -85,6 +87,14 @@ typedef struct {
     int type, p1, p2;
 } observed;
 
+/* An input event the agent sent, until the app's handler reports it back
+ * through pbagent_observe() (live = 0 then, or it expires). */
+typedef struct {
+    long ms;
+    int type, p1, p2;
+    int live;
+} injected;
+
 static struct {
     int running;
     char app_name[64];
@@ -108,10 +118,13 @@ static struct {
     int qcount;
     long next_id;
     long done_id;
+    long confirm_id; /* sent with SendEvent; done once the firmware has delivered it */
 
     observed obs[OBSERVED_LEN];
     long obs_seq;
-    int dispatching;
+    injected inj[INJECTED_LEN];
+    int inj_next;
+    int dispatching; /* the agent calls the handler itself (restart's EVT_EXIT) */
 } A = {
     .listen_fd = -1,
     .beacon_fd = -1,
@@ -189,7 +202,7 @@ static void tick(void);
 static void arm_timer(void) {
     int active;
     pthread_mutex_lock(&A.qlock);
-    active = A.qcount > 0 || A.clients > 0;
+    active = A.qcount > 0 || A.clients > 0 || A.confirm_id > A.done_id;
     pthread_mutex_unlock(&A.qlock);
     SetHardTimer("pbagent", tick, active ? TICK_ACTIVE_MS : TICK_IDLE_MS);
 }
@@ -269,9 +282,19 @@ static void dispatch(const qitem *it) {
     }
     iv_handler h = GetEventHandler();
     if (!h) return;
-    A.dispatching = 1;
+    /* On the reader SendEvent() only queues the event: the handler, and with
+     * it pbagent_observe(), runs after this timer callback has returned. So
+     * remember what was sent, and let pbagent_observe() recognise it. */
+    pthread_mutex_lock(&A.qlock);
+    injected *in = &A.inj[A.inj_next];
+    A.inj_next = (A.inj_next + 1) % INJECTED_LEN;
+    in->ms = now_ms();
+    in->type = it->type;
+    in->p1 = it->p1;
+    in->p2 = it->p2;
+    in->live = 1;
+    pthread_mutex_unlock(&A.qlock);
     SendEvent(h, it->type, it->p1, it->p2);
-    A.dispatching = 0;
 }
 
 static long started_ms;
@@ -291,6 +314,15 @@ static void check_panel(void) {
 static void tick(void) {
     if (!A.running) return;
     check_panel();
+    /* Events sent last tick have been delivered by now (the firmware runs its
+     * queue between timer callbacks): report them done, so a client's next
+     * command (a screenshot) sees what the app made of them. */
+    pthread_mutex_lock(&A.qlock);
+    if (A.confirm_id > A.done_id) {
+        A.done_id = A.confirm_id;
+        pthread_cond_broadcast(&A.qdone);
+    }
+    pthread_mutex_unlock(&A.qlock);
     for (;;) {
         qitem it;
         int found = 0;
@@ -307,8 +339,12 @@ static void tick(void) {
         if (!found) break;
         dispatch(&it);
         pthread_mutex_lock(&A.qlock);
-        if (it.id > A.done_id) A.done_id = it.id;
-        pthread_cond_broadcast(&A.qdone);
+        if (it.type >= 0 || A.confirm_id > A.done_id) {
+            if (it.id > A.confirm_id) A.confirm_id = it.id; /* input: done next tick */
+        } else {
+            if (it.id > A.done_id) A.done_id = it.id;
+            pthread_cond_broadcast(&A.qdone);
+        }
         pthread_mutex_unlock(&A.qlock);
         if (it.type == Q_CLOSEAPP) return;
     }
@@ -325,9 +361,19 @@ void pbagent_observe(int type, int par1, int par2) {
     default:
         return;
     }
-    /* Pointer moves are frequent; keep only every one that is far enough apart in time. */
     pthread_mutex_lock(&A.qlock);
     long t = now_ms();
+    /* Our own injected events come back through the handler: not the player's. */
+    for (int k = 0; k < INJECTED_LEN; k++) {
+        injected *in = &A.inj[(A.inj_next + k) % INJECTED_LEN]; /* oldest first */
+        if (in->live && t - in->ms > INJECTED_MATCH_MS) in->live = 0;
+        if (in->live && in->type == type && in->p1 == par1 && in->p2 == par2) {
+            in->live = 0;
+            pthread_mutex_unlock(&A.qlock);
+            return;
+        }
+    }
+    /* Pointer moves are frequent; keep only every one that is far enough apart in time. */
     if (type == EVT_POINTERMOVE && A.obs_seq > 0) {
         observed *last = &A.obs[(A.obs_seq - 1) % OBSERVED_LEN];
         if (last->type == EVT_POINTERMOVE && t - last->ms < 50) {
