@@ -117,9 +117,11 @@ class Device:
 
     # ------------------------------------------------------------- screen
     def screenshot(self, record: bool = True, out: Path | None = None, whole: bool = False,
-                   rotate: str = "auto") -> tuple[Gray, Path]:
+                   rotate: str | None = None) -> tuple[Gray, Path]:
         """The app canvas, or with whole=True the panel itself (/dev/fb0)."""
-        img = self.agent.fbshot(rotate) if whole else self.agent.shot().turned(self.view)
+        img = self.agent.fbshot(rotate or "auto") if whole else self.agent.shot()
+        if not whole or rotate is None:
+            img = img.turned(self.view)
         name = time.strftime("%Y%m%d-%H%M%S") + f"-{int(time.time() * 1000) % 1000:03d}.png"
         path = Path(out) if out else paths.shots_dir() / name
         path.write_bytes(img.png())
