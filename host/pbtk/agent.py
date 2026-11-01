@@ -202,6 +202,14 @@ class AgentClient:
         _, body = self.request("shot")
         return parse_pgm(body)
 
+    def fbshot(self, rotate: str = "auto") -> Gray:
+        """Whole screen from /dev/fb0 (firmware UI, dialogs, keyboard included).
+        rotate: auto (portrait as held), raw, cw, ccw."""
+        if rotate not in ("auto", "raw", "cw", "ccw"):
+            raise PbtkError("rotate must be auto, raw, cw or ccw")
+        _, body = self.request(f"fbshot {rotate}")
+        return parse_pgm(body)
+
     def tap(self, x: int, y: int, hold_ms: int = 60) -> dict:
         return self.request(f"tap {int(x)} {int(y)} {int(hold_ms)}")[0]
 

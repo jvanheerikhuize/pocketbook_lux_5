@@ -9,7 +9,7 @@ from pbtk.agent import AgentClient
 from pbtk.device import Device
 from pbtk import activity
 
-from support import BUTTON1, BUTTON2, TOKEN, DemoApp, IsolatedState
+from support import BUTTON1, BUTTON2, FB_H, FB_W, TOKEN, DemoApp, IsolatedState, fb_pixel
 
 
 def inside(rect, dx=40, dy=30):
@@ -61,6 +61,37 @@ class AgentTest(IsolatedState):
         img = self.client.shot()
         self.assertEqual(img.at(*inside(BUTTON2)), 0)
         self.assertEqual(img.at(*inside(BUTTON1)), 255)
+
+    def test_fbshot_rotations(self):
+        raw = self.client.fbshot("raw")
+        self.assertEqual((raw.width, raw.height), (FB_W, FB_H))
+        self.assertEqual(raw.pixels, bytes(fb_pixel(x, y) for y in range(FB_H) for x in range(FB_W)))
+        self.assertNotIn(0xEE, raw.pixels, "stride padding must be skipped")
+
+        cw = self.client.fbshot("cw")
+        self.assertEqual((cw.width, cw.height), (FB_H, FB_W))
+        for ny in range(FB_W):
+            for nx in range(FB_H):
+                self.assertEqual(cw.at(nx, ny), fb_pixel(ny, FB_H - 1 - nx))
+        # Same convention as the host-side rotation used by `pbtk probe collect`.
+        self.assertEqual(cw.pixels, raw.rotate_cw().pixels)
+
+        ccw = self.client.fbshot("ccw")
+        for ny in range(FB_W):
+            for nx in range(FB_H):
+                self.assertEqual(ccw.at(nx, ny), fb_pixel(FB_W - 1 - ny, nx))
+
+        self.assertEqual(self.client.fbshot().pixels, cw.pixels, "auto = cw for a landscape buffer")
+        with self.assertRaisesRegex(PbtkError, "rotate must be"):
+            self.client.fbshot("sideways")
+        with self.assertRaisesRegex(PbtkError, "fbshot mode"):
+            self.client.request("fbshot sideways")
+
+    def test_fbshot_missing_device(self):
+        self.app.fb.unlink()
+        with self.assertRaisesRegex(PbtkError, "read .*fb0"):
+            self.client.fbshot()
+        self.client.ping()  # connection still fine
 
     def test_unknown_key_and_command(self):
         with self.assertRaisesRegex(PbtkError, "unknown key"):

@@ -31,9 +31,10 @@ on 6.9 is unconfirmed.
 - Apps run as `reader`, not root; input devices are not writable → driving
   the reader outside an app still needs PBJB (T2).
 - `/dev/fb0` **is** readable by apps and shows the whole firmware UI (landscape
-  buffer, turn 90° CW) → whole-screen *watching* works without root. Next:
-  a `fbshot` agent command so screenshots include InkView dialogs, the
-  on-screen keyboard and firmware overlays, not only the app canvas.
+  buffer, turn 90° CW) → whole-screen *watching* works without root. Done:
+  the agent's `fbshot` command (`pbtk shot --whole`, MCP `whole: true`, GUI
+  "whole screen") includes InkView dialogs, the on-screen keyboard and
+  firmware overlays, not only the app canvas.
 - `/sbin/dropbear` ships with the firmware → a user-level SSH shell on a high
   port from an `.app` is worth a test before reaching for PBJB.
 

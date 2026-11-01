@@ -126,7 +126,7 @@ def make_handler(app: App):
                     a = app.agent()
                     if not a:
                         return self._json({"error": "no agent"}, 503)
-                    img = a.shot()
+                    img = a.fbshot() if q.get("whole") == "1" else a.shot()
                     return self._send(200, img.png(), "image/png",
                                       {"X-Width": str(img.width), "X-Height": str(img.height)})
                 if u.path.startswith("/api/shots/"):
@@ -233,7 +233,7 @@ def make_handler(app: App):
                     activity.set_hold(bool(b.get("on")))
                     activity.record("gui", "hold", {"on": bool(b.get("on"))})
                 elif u.path == "/api/screenshot":
-                    _, path = d.screenshot()
+                    _, path = d.screenshot(whole=bool(b.get("whole")))
                     return self._json({"ok": True, "shot": path.name})
                 elif u.path == "/api/deploy":
                     proj = project.load(b.get("project") or None)

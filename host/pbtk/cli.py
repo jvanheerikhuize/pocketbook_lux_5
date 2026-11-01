@@ -144,7 +144,8 @@ def cmd_info(args):
 
 
 def cmd_shot(args):
-    img, path = _dev(args).screenshot(out=Path(args.output) if args.output else None)
+    img, path = _dev(args).screenshot(out=Path(args.output) if args.output else None,
+                                      whole=args.whole, rotate=args.rotate)
     print(path)
 
 
@@ -270,6 +271,10 @@ def build_parser() -> argparse.ArgumentParser:
     add("info", cmd_info, "running app and screen, via agent")
     sp = add("shot", cmd_shot, "screenshot of the running app (PNG)")
     sp.add_argument("-o", "--output")
+    sp.add_argument("-w", "--whole", action="store_true",
+                    help="whole panel from /dev/fb0 (firmware UI, dialogs, keyboard), not just the app canvas")
+    sp.add_argument("--rotate", choices=["auto", "raw", "cw", "ccw"], default="auto",
+                    help="with --whole: auto = portrait as held (default)")
     for name, fn, coords in (("tap", cmd_tap, ["x", "y"]), ("long", cmd_long, ["x", "y"])):
         sp = add(name, fn, f"{name} at screen coordinates")
         for c in coords:

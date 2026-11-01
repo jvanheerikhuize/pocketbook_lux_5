@@ -343,47 +343,168 @@ static int reply_err(int fd, const char *fmt, ...) {
 
 /* ------------------------------------------------------------- commands */
 
-static int canvas_pgm(char **out, size_t *len, int *w_out, int *h_out) {
-    icanvas *c = GetCanvas();
-    if (!c || !c->addr || c->width <= 0 || c->height <= 0) return -1;
-    int w = c->width, h = c->height, depth = c->depth, scan = c->scanline;
+/* Convert one row of `w` pixels at `depth` bits to 8-bit gray. -1 if unsupported. */
+static int gray_row(const unsigned char *src, int depth, int w, unsigned char *row) {
+    if (depth == 8) {
+        memcpy(row, src, (size_t)w);
+    } else if (depth == 4) {
+        for (int x = 0; x < w; x++) {
+            unsigned char b = src[x / 2];
+            unsigned char v = (x & 1) ? (b & 0x0f) : (b >> 4);
+            row[x] = (unsigned char)(v * 17);
+        }
+    } else if (depth == 16) {
+        for (int x = 0; x < w; x++) {
+            unsigned v = src[2 * x] | (src[2 * x + 1] << 8);
+            int r = (v >> 11) << 3, g = ((v >> 5) & 63) << 2, b = (v & 31) << 3;
+            row[x] = (unsigned char)((r * 299 + g * 587 + b * 114) / 1000);
+        }
+    } else if (depth >= 24) {
+        int bpp = depth / 8;
+        for (int x = 0; x < w; x++) {
+            const unsigned char *p = src + x * bpp;
+            row[x] = (unsigned char)((p[2] * 299 + p[1] * 587 + p[0] * 114) / 1000);
+        }
+    } else {
+        return -1;
+    }
+    return 0;
+}
+
+/* Allocate a PGM with room for w*h pixels; returns the pixel pointer. */
+static unsigned char *pgm_alloc(int w, int h, char **out, size_t *len) {
     char head[64];
     int hl = snprintf(head, sizeof head, "P5\n%d %d\n255\n", w, h);
     size_t total = (size_t)hl + (size_t)w * (size_t)h;
     char *buf = malloc(total);
-    if (!buf) return -1;
+    if (!buf) return NULL;
     memcpy(buf, head, (size_t)hl);
-    unsigned char *dst = (unsigned char *)buf + hl;
+    *out = buf;
+    *len = total;
+    return (unsigned char *)buf + hl;
+}
+
+static int canvas_pgm(char **out, size_t *len, int *w_out, int *h_out) {
+    icanvas *c = GetCanvas();
+    if (!c || !c->addr || c->width <= 0 || c->height <= 0) return -1;
+    int w = c->width, h = c->height;
+    unsigned char *dst = pgm_alloc(w, h, out, len);
+    if (!dst) return -1;
     for (int y = 0; y < h; y++) {
-        const unsigned char *src = c->addr + (size_t)y * (size_t)scan;
-        unsigned char *row = dst + (size_t)y * (size_t)w;
-        if (depth == 8) {
-            memcpy(row, src, (size_t)w);
-        } else if (depth == 4) {
-            for (int x = 0; x < w; x++) {
-                unsigned char b = src[x / 2];
-                unsigned char v = (x & 1) ? (b & 0x0f) : (b >> 4);
-                row[x] = (unsigned char)(v * 17);
-            }
-        } else if (depth == 16) {
-            for (int x = 0; x < w; x++) {
-                unsigned v = src[2 * x] | (src[2 * x + 1] << 8);
-                int r = (v >> 11) << 3, g = ((v >> 5) & 63) << 2, b = (v & 31) << 3;
-                row[x] = (unsigned char)((r * 299 + g * 587 + b * 114) / 1000);
-            }
-        } else if (depth >= 24) {
-            int bpp = depth / 8;
-            for (int x = 0; x < w; x++) {
-                const unsigned char *p = src + x * bpp;
-                row[x] = (unsigned char)((p[2] * 299 + p[1] * 587 + p[0] * 114) / 1000);
-            }
-        } else {
-            free(buf);
+        if (gray_row(c->addr + (size_t)y * (size_t)c->scanline, c->depth, w,
+                     dst + (size_t)y * (size_t)w) != 0) {
+            free(*out);
             return -1;
         }
     }
-    *out = buf;
-    *len = total;
+    if (w_out) *w_out = w;
+    if (h_out) *h_out = h;
+    return 0;
+}
+
+/* ---- whole-screen capture from the framebuffer (fbshot) ----
+ * On the PB628 /dev/fb0 is readable by apps (uid reader) and holds what the
+ * panel shows, including firmware UI, as an 8-bit 1024x758 landscape buffer
+ * for the portrait panel; turning it 90° clockwise gives the panel as held
+ * (docs/FACTS.md). $PBAGENT_FB and $PBAGENT_FB_SYS override the device and
+ * its sysfs directory (used by host tests). */
+
+static int read_sys(const char *dir, const char *name, char *buf, size_t n) {
+    char path[PATH_MAX];
+    snprintf(path, sizeof path, "%s/%s", dir, name);
+    FILE *f = fopen(path, "r");
+    if (!f) return -1;
+    int ok = fgets(buf, (int)n, f) != NULL;
+    fclose(f);
+    if (!ok) return -1;
+    buf[strcspn(buf, "\r\n")] = 0;
+    return 0;
+}
+
+/* rotate: 0 = as stored, 1 = 90° clockwise, 3 = 90° counter-clockwise,
+ *         -1 = auto (clockwise when the buffer is landscape). */
+static int fb_pgm(int rotate, char **out, size_t *len, int *w_out, int *h_out, char *err,
+                  size_t errn) {
+    const char *dev = getenv("PBAGENT_FB");
+    const char *sys = getenv("PBAGENT_FB_SYS");
+    if (!dev) dev = "/dev/fb0";
+    if (!sys) sys = "/sys/class/graphics/fb0";
+    char v[64], b[32], s[32];
+    int fw = 0, fh = 0, bpp = 0, stride = 0;
+    if (read_sys(sys, "virtual_size", v, sizeof v) != 0 || sscanf(v, "%d,%d", &fw, &fh) != 2 ||
+        read_sys(sys, "bits_per_pixel", b, sizeof b) != 0 || (bpp = atoi(b)) <= 0) {
+        snprintf(err, errn, "framebuffer geometry unavailable in %s", sys);
+        return -1;
+    }
+    stride = read_sys(sys, "stride", s, sizeof s) == 0 ? atoi(s) : 0;
+    if (stride <= 0) stride = fw * (bpp >= 8 ? bpp / 8 : 1);
+    if (fw <= 0 || fh <= 0 || fw > 8192 || fh > 8192) {
+        snprintf(err, errn, "bad framebuffer size %dx%d", fw, fh);
+        return -1;
+    }
+    size_t raw_len = (size_t)stride * (size_t)fh;
+    unsigned char *raw = malloc(raw_len);
+    unsigned char *gray = malloc((size_t)fw * (size_t)fh);
+    if (!raw || !gray) {
+        free(raw);
+        free(gray);
+        snprintf(err, errn, "oom");
+        return -1;
+    }
+    int fd = open(dev, O_RDONLY | O_CLOEXEC);
+    size_t got = 0;
+    if (fd >= 0) {
+        while (got < raw_len) {
+            ssize_t r = read(fd, raw + got, raw_len - got);
+            if (r < 0 && errno == EINTR) continue;
+            if (r <= 0) break;
+            got += (size_t)r;
+        }
+        close(fd);
+    }
+    if (fd < 0 || got < raw_len) {
+        snprintf(err, errn, "read %s: %s", dev, fd < 0 ? strerror(errno) : "short read");
+        free(raw);
+        free(gray);
+        return -1;
+    }
+    for (int y = 0; y < fh; y++) {
+        if (gray_row(raw + (size_t)y * (size_t)stride, bpp, fw, gray + (size_t)y * (size_t)fw) != 0) {
+            snprintf(err, errn, "unsupported depth %d", bpp);
+            free(raw);
+            free(gray);
+            return -1;
+        }
+    }
+    free(raw);
+
+    if (rotate < 0) rotate = fw > fh ? 1 : 0;
+    int w = (rotate == 1 || rotate == 3) ? fh : fw;
+    int h = (rotate == 1 || rotate == 3) ? fw : fh;
+    unsigned char *dst = pgm_alloc(w, h, out, len);
+    if (!dst) {
+        free(gray);
+        snprintf(err, errn, "oom");
+        return -1;
+    }
+    for (int ny = 0; ny < h; ny++) {
+        unsigned char *row = dst + (size_t)ny * (size_t)w;
+        for (int nx = 0; nx < w; nx++) {
+            int sx, sy;
+            if (rotate == 1) {        /* clockwise */
+                sx = ny;
+                sy = fh - 1 - nx;
+            } else if (rotate == 3) { /* counter-clockwise */
+                sx = fw - 1 - ny;
+                sy = nx;
+            } else {
+                sx = nx;
+                sy = ny;
+            }
+            row[nx] = gray[(size_t)sy * (size_t)fw + (size_t)sx];
+        }
+    }
+    free(gray);
     if (w_out) *w_out = w;
     if (h_out) *h_out = h;
     return 0;
@@ -564,6 +685,21 @@ static int handle(int fd, char *line) {
         if (canvas_pgm(&pgm, &len, &w, &h) != 0) return reply_err(fd, "no canvas");
         char extra[48];
         snprintf(extra, sizeof extra, "width=%d height=%d", w, h);
+        int rc = reply_ok(fd, pgm, len, extra);
+        free(pgm);
+        return rc;
+    }
+    if (!strcmp(cmd, "fbshot")) {
+        const char *mode = argc > 1 ? argv[1] : "auto";
+        int rot = !strcmp(mode, "auto") ? -1 : !strcmp(mode, "raw") ? 0
+                  : !strcmp(mode, "cw") ? 1 : !strcmp(mode, "ccw") ? 3 : -2;
+        if (rot == -2) return reply_err(fd, "fbshot mode must be auto, raw, cw or ccw");
+        char *pgm, err[160] = "";
+        size_t len;
+        int w, h;
+        if (fb_pgm(rot, &pgm, &len, &w, &h, err, sizeof err) != 0) return reply_err(fd, "%s", err);
+        char extra[64];
+        snprintf(extra, sizeof extra, "width=%d height=%d source=fb", w, h);
         int rc = reply_ok(fd, pgm, len, extra);
         free(pgm);
         return rc;

@@ -59,6 +59,9 @@ class GuiTest(IsolatedState):
         code, headers, png = self.get("/api/screen.png")
         self.assertEqual(png_size(png), (758, 1024))
         self.assertEqual(headers["X-Width"], "758")
+        _, headers, png = self.get("/api/screen.png?whole=1")
+        self.assertEqual(png_size(png), (4, 6))
+        self.assertEqual(headers["X-Width"], "4")
 
     def test_tap_records_gui_activity(self):
         x, y, _, _ = BUTTON1
@@ -150,6 +153,14 @@ class McpTest(IsolatedState):
         self.assertTrue(any(c["type"] == "image" for c in r["content"]))
         entries, _ = activity.read(0)
         self.assertEqual(entries[-1]["source"], "mcp")
+
+    def test_whole_screen_screenshot(self):
+        r = self.rpc("tools/call", {"name": "pb_screenshot", "arguments": {"whole": True}})["result"]
+        self.assertFalse(r["isError"])
+        self.assertTrue(r["content"][0]["text"].startswith("whole screen 4x6"))
+        img = [c for c in r["content"] if c["type"] == "image"][0]
+        self.assertEqual(png_size(base64.b64decode(img["data"])), (4, 6))
+        self.assertEqual(activity.read(0)[0][-1]["args"], {"whole": True})
 
     def test_errors_are_tool_errors(self):
         r = self.rpc("tools/call", {"name": "pb_key", "arguments": {"name": "bogus"}})["result"]

@@ -36,7 +36,10 @@ TOOLS = [
     _tool("pb_status", "What is reachable: USB storage (deploy/logs) and the in-app agent (screen/input). "
           "Also says whether the user has taken control in the GUI."),
     _tool("pb_screenshot", "Screenshot of the app running on the PocketBook (8-bit gray PNG, canvas coordinates "
-          "match pb_tap)."),
+          "match pb_tap). whole=true captures the panel itself from /dev/fb0, so firmware menus, "
+          "InkView dialogs and the on-screen keyboard are included.",
+          {"whole": {"type": "boolean", "default": False},
+           "rotate": {"type": "string", "enum": ["auto", "raw", "cw", "ccw"], "default": "auto"}}),
     _tool("pb_info", "Running app, screen size, orientation, firmware, agent version."),
     _tool("pb_tap", "Tap at a screen point in the running app.", {**_XY, **_SHOT}, ["x", "y"]),
     _tool("pb_long_press", "Long-press at a screen point.", {**_XY, **_SHOT}, ["x", "y"]),
@@ -95,8 +98,10 @@ class Server:
         if name == "pb_status":
             return [_text(json.dumps(d.status(), indent=2))]
         if name == "pb_screenshot":
-            img, path = d.screenshot()
-            return [_text(f"{img.width}x{img.height} ({path})"), _image(img.png())]
+            whole = bool(a.get("whole", False))
+            img, path = d.screenshot(whole=whole, rotate=a.get("rotate", "auto"))
+            what = "whole screen" if whole else "app canvas"
+            return [_text(f"{what} {img.width}x{img.height} ({path})"), _image(img.png())]
         if name == "pb_info":
             return [_text(json.dumps(d.agent.info(), indent=2))]
         if name == "pb_tap":

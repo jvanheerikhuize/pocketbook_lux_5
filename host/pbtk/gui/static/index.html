@@ -87,6 +87,7 @@ label { display: inline-flex; gap: 5px; align-items: center; }
   <span class="pill" id="pill-usb"><span class="dot"></span>USB</span>
   <span class="pill" id="pill-agent"><span class="dot"></span>agent</span>
   <span class="spacer"></span>
+  <label title="Mirror the whole panel (/dev/fb0: firmware UI, dialogs, keyboard) instead of the app canvas"><input type="checkbox" id="whole"> whole screen</label>
   <label title="Mirror refresh"><input type="checkbox" id="live" checked> live</label>
   <button id="hold" title="Block Claude's input while you drive">I'm driving: off</button>
 </header>
@@ -192,7 +193,7 @@ async function loadShot() {
   if (!agentUp) return;
   const img = $("#screen");
   try {
-    const r = await fetch("/api/screen.png?t=" + Date.now());
+    const r = await fetch("/api/screen.png?t=" + Date.now() + ($("#whole").checked ? "&whole=1" : ""));
     if (!r.ok) throw new Error("no agent");
     screenSize = [+r.headers.get("X-Width"), +r.headers.get("X-Height")];
     const url = URL.createObjectURL(await r.blob());
@@ -235,7 +236,9 @@ $("#screen").addEventListener("pointerup", async (ev) => {
 document.querySelectorAll("[data-key]").forEach((b) => b.addEventListener("click", async () => {
   try { await api("/api/key", { name: b.dataset.key }); scheduleShot(); } catch (e) { toast(e.message); } }));
 $("#btn-refresh").onclick = () => api("/api/refresh", {}).then(() => scheduleShot(600)).catch((e) => toast(e.message));
-$("#btn-shot").onclick = () => api("/api/screenshot", {}).then((r) => toast("saved " + r.shot)).catch((e) => toast(e.message));
+$("#whole").checked = store.get("pbtk.whole", "0") === "1";
+$("#whole").onchange = () => { store.set("pbtk.whole", $("#whole").checked ? "1" : "0"); loadShot(); };
+$("#btn-shot").onclick = () => api("/api/screenshot", { whole: $("#whole").checked }).then((r) => toast("saved " + r.shot)).catch((e) => toast(e.message));
 $("#btn-exit").onclick = () => api("/api/exit", {}).then(() => toast("app asked to close")).catch((e) => toast(e.message));
 
 // ------------------------------------------------------------------ hold

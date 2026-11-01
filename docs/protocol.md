@@ -19,6 +19,7 @@ The first line of every connection must be `auth <token>`; anything else gets
 | `ping` | — | |
 | `info` | `key=value` lines: agent, app, pid, port, width, height, depth, orientation, model, firmware, bundle, log | |
 | `shot` | binary PGM (P5, 8-bit), fields `width height` | the app's canvas (what InkView draws), not `/dev/fb0` |
+| `fbshot [auto\|raw\|cw\|ccw]` | binary PGM, fields `width height source=fb` | the whole panel from `/dev/fb0` (firmware UI, InkView dialogs, on-screen keyboard). `auto` turns a landscape buffer 90° clockwise = the PB628 as held. `$PBAGENT_FB` / `$PBAGENT_FB_SYS` override the device and its sysfs dir |
 | `tap X Y [HOLD_MS=60]` | field `dispatched=1/0` | `EVT_POINTERDOWN`, then `EVT_POINTERUP` after HOLD_MS |
 | `long X Y` | `dispatched` | down, `EVT_POINTERLONG` at 600 ms, up at 900 ms |
 | `down/move/up X Y` | `dispatched` | single pointer events |

@@ -50,6 +50,7 @@ cd ~/Repos/mmIV       # has a pbtk.toml
 pbtk deploy --build --eject     # build, copy, write the agent token, eject
 # open the app on the reader (Wi-Fi on)
 pbtk shot             # → PNG path;  pbtk tap X Y --shot;  pbtk key back
+pbtk shot --whole     # the whole panel (/dev/fb0): firmware menus, dialogs, keyboard
 pbtk logs -f          # live app log
 pbtk run session.pbtk # replay a recorded session (Timeline → "Save as script")
 ```

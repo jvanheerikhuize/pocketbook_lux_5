@@ -77,13 +77,16 @@ class Device:
         return result, img, shot_path
 
     # ------------------------------------------------------------- screen
-    def screenshot(self, record: bool = True, out: Path | None = None) -> tuple[Gray, Path]:
-        img = self.agent.shot()
+    def screenshot(self, record: bool = True, out: Path | None = None, whole: bool = False,
+                   rotate: str = "auto") -> tuple[Gray, Path]:
+        """The app canvas, or with whole=True the panel itself (/dev/fb0)."""
+        img = self.agent.fbshot(rotate) if whole else self.agent.shot()
         name = time.strftime("%Y%m%d-%H%M%S") + f"-{int(time.time() * 1000) % 1000:03d}.png"
         path = Path(out) if out else paths.shots_dir() / name
         path.write_bytes(img.png())
         if record:
-            activity.record(self.source, "screenshot", {}, shot=path.name if not out else None,
+            activity.record(self.source, "screenshot", {"whole": True} if whole else {},
+                            shot=path.name if not out else None,
                             result=f"{img.width}x{img.height}")
         return img, path
 

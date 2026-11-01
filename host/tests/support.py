@@ -20,6 +20,13 @@ BUTTON1 = (63, 170, 300, 211)
 BUTTON2 = (394, 170, 300, 211)
 
 
+FB_W, FB_H, FB_STRIDE = 6, 4, 8
+
+
+def fb_pixel(x: int, y: int) -> int:
+    return y * FB_W + x + 1
+
+
 def free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
@@ -81,8 +88,20 @@ class DemoApp:
         shutil.copy2(exe, self.exe)
         self.port = free_port()
         self.input_file = self.dir / "user-input.txt"
+        # A fake landscape framebuffer like the PB628's (FB_W x FB_H, 8 bpp,
+        # stride padded with 0xEE), for `fbshot`.
+        self.fb = workdir / "fb0"
+        self.fb_sys = workdir / "fb0-sys"
+        self.fb_sys.mkdir(exist_ok=True)
+        (self.fb_sys / "virtual_size").write_text(f"{FB_W},{FB_H}\n")
+        (self.fb_sys / "bits_per_pixel").write_text("8\n")
+        (self.fb_sys / "stride").write_text(f"{FB_STRIDE}\n")
+        self.fb.write_bytes(b"".join(
+            bytes(fb_pixel(x, y) for x in range(FB_W)) + b"\xee" * (FB_STRIDE - FB_W)
+            for y in range(FB_H)))
         env = dict(os.environ, PBAGENT_TOKEN=token, PBAGENT_PORT=str(self.port),
-                   PBTK_STUB_INPUT=str(self.input_file))
+                   PBTK_STUB_INPUT=str(self.input_file),
+                   PBAGENT_FB=str(self.fb), PBAGENT_FB_SYS=str(self.fb_sys))
         self.proc = subprocess.Popen([str(self.exe)], env=env, cwd=self.dir,
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         deadline = time.monotonic() + 5
