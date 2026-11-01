@@ -210,6 +210,37 @@ class AgentClient:
         _, body = self.request(f"fbshot {rotate}")
         return parse_pgm(body)
 
+    def sum(self, path: str) -> tuple[int, int] | None:
+        """(crc32, size) of a file on the reader, or None if it does not exist."""
+        _check_path(path)
+        body = self.request(f"sum {path}")[1].decode().strip()
+        if body == "missing":
+            return None
+        crc, size = body.split()
+        return int(crc, 16), int(size)
+
+    def restart(self) -> None:
+        """Ask the app to re-exec itself in place (same pid, new image from disk)."""
+        self.request("restart")
+        self.close()
+
+    def wait_restarted(self, old_started: str, timeout: float = 30.0) -> dict:
+        """Poll until the agent is back with a new start time; returns its info."""
+        deadline = time.monotonic() + timeout
+        last = "no answer"
+        while time.monotonic() < deadline:
+            time.sleep(0.5)
+            try:
+                info = self.info()
+            except PbtkError as e:
+                last = str(e)
+                self.close()
+                continue
+            if info.get("started") != old_started:
+                return info
+        raise PbtkError(f"the app did not come back within {timeout:.0f} s after restart ({last}). "
+                        "Open it on the reader; its log may say why.")
+
     def fbinfo(self) -> dict:
         """Framebuffer geometry as the driver reports it (resolution, virtual size, pan)."""
         _, body = self.request("fbinfo")

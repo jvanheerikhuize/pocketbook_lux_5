@@ -1,12 +1,15 @@
 """End to end: pbtk's client against the real libpbagent (demo app on the stub)."""
 
+import shutil
 import socket
 import time
 import unittest
+import zlib
 
 from pbtk import PbtkError
 from pbtk.agent import AgentClient
 from pbtk.device import Device
+from pbtk.project import Project
 from pbtk import activity
 
 from support import BUTTON1, BUTTON2, FB_H, FB_W, TOKEN, DemoApp, IsolatedState, fb_pixel
@@ -175,6 +178,57 @@ class AgentTest(IsolatedState):
         with self.assertRaisesRegex(PbtkError, "path not allowed"):
             self.client.put("/etc/pbtk-test", b"x" * 1000)
         self.client.ping()
+
+
+    def test_sum_matches_zlib(self):
+        data = bytes(range(256)) * 37
+        p = str(self.app.dir / "blob.bin")
+        self.client.put(p, data)
+        self.assertEqual(self.client.sum(p), (zlib.crc32(data), len(data)))
+        self.assertIsNone(self.client.sum(str(self.app.dir / "nope.bin")))
+
+    def test_put_creates_parent_folders(self):
+        p = self.app.dir / "a" / "b" / "c.txt"
+        self.client.put(str(p), b"deep\n")
+        self.assertEqual(p.read_bytes(), b"deep\n")
+
+    def test_restart_keeps_pid_and_changes_start(self):
+        before = self.client.info()
+        self.assertIn("build", before)
+        self.client.restart()
+        after = self.client.wait_restarted(before["started"], timeout=10)
+        self.assertEqual(after["pid"], before["pid"])
+        self.assertNotEqual(after["started"], before["started"])
+        self.assertIsNone(self.app.proc.poll())
+        self.client.ping()
+
+    def test_deploy_wifi_copies_changes_and_restarts(self):
+        # A project whose dist mirrors the running bundle: <apps_root>/bundle/...
+        root = self.tmp / "proj"
+        dist = root / "dist"
+        (dist / "bundle").mkdir(parents=True)
+        shutil.copy2(self.app.exe, dist / "bundle" / "pbtk-demo")  # same as running: unchanged
+        (dist / "bundle" / "assets").mkdir()
+        (dist / "bundle" / "assets" / "level1.txt").write_bytes(b"new level\n")
+        proj = Project(root=root, name="pbtk-demo", dist=dist, log=None, build=None)
+        d = Device(source="cli", agent_addr=self.app.address, discover_timeout=0)
+        d.apps_root = str(self.tmp)
+        try:
+            r = d.deploy_wifi(proj, restart=True)
+            self.assertEqual(r["changed"], [f"{self.tmp}/bundle/assets/level1.txt"])
+            self.assertEqual(r["unchanged"], 1)
+            self.assertTrue(r["restarted"])
+            self.assertTrue(r["pid_kept"])
+            self.assertEqual((self.app.dir / "assets" / "level1.txt").read_bytes(), b"new level\n")
+            # Second run: nothing to send.
+            r = d.deploy_wifi(proj)
+            self.assertEqual((r["changed"], r["unchanged"], r["restarted"]), ([], 2, False))
+            # Restart refuses to replace a different app.
+            other = Project(root=root, name="mmiv", dist=dist, log=None, build=None)
+            with self.assertRaisesRegex(PbtkError, "running app is"):
+                d.deploy_wifi(other, restart=True)
+        finally:
+            d.close()
 
     def test_several_clients(self):
         others = [AgentClient("127.0.0.1", self.app.port, TOKEN, timeout=5) for _ in range(3)]

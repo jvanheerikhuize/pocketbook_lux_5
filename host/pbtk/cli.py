@@ -57,12 +57,28 @@ def cmd_probe(args):
 def cmd_deploy(args):
     proj = project.load(args.project)
     d = _dev(args)
+    if args.restart and not args.wifi:
+        raise PbtkError("--restart needs --wifi (over USB the app cannot run)")
+    if args.wifi:
+        r = d.deploy_wifi(proj, build=args.build, restart=args.restart)
+        print(f"deployed {proj.name} over Wi-Fi: {len(r['changed'])} file(s) changed, "
+              f"{r['unchanged']} unchanged")
+        for c in r["changed"]:
+            print(f"  {c}")
+        if r["restarted"]:
+            print(f"restarted in place (pid kept: {'yes' if r['pid_kept'] else 'no'}, build {r['build']})")
+        return
     changed = d.deploy(proj, build=args.build, eject=args.eject)
     print(f"deployed {proj.name}: {len(changed)} file(s) changed")
     for c in changed[:50]:
         print(f"  {c}")
     if args.eject:
         print("ejected: open the app on the reader")
+
+
+def cmd_restart(args):
+    r = _dev(args).restart_app()
+    print(f"restarted in place (pid kept: {'yes' if r['pid_kept'] else 'no'}, build {r['build']})")
 
 
 def cmd_eject(args):
@@ -263,11 +279,16 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("probe", cmd_probe, "phase 1: install the probe app / collect its facts")
     sp.add_argument("action", choices=["install", "collect"])
     sp.add_argument("--json", action="store_true")
-    sp = add("deploy", cmd_deploy, "copy a project's built bundle to the reader (USB)")
+    sp = add("deploy", cmd_deploy, "copy a project's built bundle to the reader (USB, or --wifi)")
     sp.add_argument("--project", help="dir with pbtk.toml (default: search upwards)")
     sp.add_argument("--build", action="store_true", help="run the project's build command first")
     sp.add_argument("--eject", action="store_true", help="eject afterwards so you can open the app")
+    sp.add_argument("--wifi", action="store_true",
+                    help="copy changed files through the running app's agent instead of USB")
+    sp.add_argument("--restart", action="store_true",
+                    help="with --wifi: restart the running app in place to load the new build")
     add("eject", cmd_eject, "unmount the reader so it leaves PC-link mode")
+    add("restart", cmd_restart, "restart the running app in place (loads the binary on disk)")
     sp = add("logs", cmd_logs, "app log: live via agent, else from USB")
     sp.add_argument("-n", "--lines", type=int, default=50)
     sp.add_argument("--log", help="device path of the log (default: from pbtk.toml)")
