@@ -17,6 +17,7 @@
 #include <fcntl.h>
 #include <inkview.h>
 #include <limits.h>
+#include <linux/fb.h>
 #include <netinet/in.h>
 #include <poll.h>
 #include <pthread.h>
@@ -24,6 +25,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/types.h>
@@ -421,62 +423,148 @@ static int read_sys(const char *dir, const char *name, char *buf, size_t n) {
     return 0;
 }
 
+typedef struct {
+    int xres, yres;   /* visible */
+    int vxres, vyres; /* virtual (allocated) */
+    int xoff, yoff;   /* pan: where the visible window starts in the virtual buffer */
+    int bpp, line;    /* bits per pixel, bytes per line */
+    int rotate;       /* driver rotation hint (informational) */
+    const char *source;
+} fbgeo;
+
+static const char *fb_dev(void) {
+    const char *d = getenv("PBAGENT_FB");
+    return d ? d : "/dev/fb0";
+}
+
+static const char *fb_sysdir(void) {
+    const char *s = getenv("PBAGENT_FB_SYS");
+    return s ? s : "/sys/class/graphics/fb0";
+}
+
+/* Geometry from the driver (ioctl) when possible, else from sysfs. */
+static int fb_geometry(int fd, fbgeo *g, char *err, size_t errn) {
+    memset(g, 0, sizeof *g);
+    struct fb_var_screeninfo var;
+    struct fb_fix_screeninfo fix;
+    if (fd >= 0 && ioctl(fd, FBIOGET_VSCREENINFO, &var) == 0 &&
+        ioctl(fd, FBIOGET_FSCREENINFO, &fix) == 0) {
+        g->xres = (int)var.xres;
+        g->yres = (int)var.yres;
+        g->vxres = (int)var.xres_virtual;
+        g->vyres = (int)var.yres_virtual;
+        g->xoff = (int)var.xoffset;
+        g->yoff = (int)var.yoffset;
+        g->bpp = (int)var.bits_per_pixel;
+        g->line = (int)fix.line_length;
+        g->rotate = (int)var.rotate;
+        g->source = "ioctl";
+    } else {
+        const char *sys = fb_sysdir();
+        char v[64], b[32], s[32], p[64], r[32];
+        if (read_sys(sys, "virtual_size", v, sizeof v) != 0 ||
+            sscanf(v, "%d,%d", &g->vxres, &g->vyres) != 2 ||
+            read_sys(sys, "bits_per_pixel", b, sizeof b) != 0 || (g->bpp = atoi(b)) <= 0) {
+            snprintf(err, errn, "framebuffer geometry unavailable (no ioctl, no %s)", sys);
+            return -1;
+        }
+        g->xres = g->vxres;
+        g->yres = g->vyres;
+        g->line = read_sys(sys, "stride", s, sizeof s) == 0 ? atoi(s) : 0;
+        if (read_sys(sys, "pan", p, sizeof p) != 0 || sscanf(p, "%d,%d", &g->xoff, &g->yoff) != 2)
+            g->xoff = g->yoff = 0;
+        g->rotate = read_sys(sys, "rotate", r, sizeof r) == 0 ? atoi(r) : 0;
+        g->source = "sysfs";
+    }
+    if (g->vxres < g->xres) g->vxres = g->xres;
+    if (g->vyres < g->yres) g->vyres = g->yres;
+    if (g->line <= 0) g->line = g->vxres * (g->bpp >= 8 ? g->bpp / 8 : 1);
+    if (g->xres <= 0 || g->yres <= 0 || g->vxres > 8192 || g->vyres > 16384) {
+        snprintf(err, errn, "bad framebuffer size %dx%d (virtual %dx%d)", g->xres, g->yres,
+                 g->vxres, g->vyres);
+        return -1;
+    }
+    return 0;
+}
+
+static int cmd_fbinfo(int fd) {
+    char err[160] = "", buf[512];
+    fbgeo g;
+    int dfd = open(fb_dev(), O_RDONLY | O_CLOEXEC);
+    int rc = fb_geometry(dfd, &g, err, sizeof err);
+    if (dfd >= 0) close(dfd);
+    if (rc != 0) return reply_err(fd, "%s", err);
+    int n = snprintf(buf, sizeof buf,
+                     "source=%s\ndevice=%s\nxres=%d\nyres=%d\nxres_virtual=%d\nyres_virtual=%d\n"
+                     "xoffset=%d\nyoffset=%d\nbits_per_pixel=%d\nline_length=%d\nrotate=%d\n",
+                     g.source, fb_dev(), g.xres, g.yres, g.vxres, g.vyres, g.xoff, g.yoff, g.bpp,
+                     g.line, g.rotate);
+    return reply_ok(fd, buf, (size_t)n, NULL);
+}
+
 /* rotate: 0 = as stored, 1 = 90° clockwise, 3 = 90° counter-clockwise,
- *         -1 = auto (clockwise when the buffer is landscape). */
-static int fb_pgm(int rotate, char **out, size_t *len, int *w_out, int *h_out, char *err,
-                  size_t errn) {
-    const char *dev = getenv("PBAGENT_FB");
-    const char *sys = getenv("PBAGENT_FB_SYS");
-    if (!dev) dev = "/dev/fb0";
-    if (!sys) sys = "/sys/class/graphics/fb0";
-    char v[64], b[32], s[32];
-    int fw = 0, fh = 0, bpp = 0, stride = 0;
-    if (read_sys(sys, "virtual_size", v, sizeof v) != 0 || sscanf(v, "%d,%d", &fw, &fh) != 2 ||
-        read_sys(sys, "bits_per_pixel", b, sizeof b) != 0 || (bpp = atoi(b)) <= 0) {
-        snprintf(err, errn, "framebuffer geometry unavailable in %s", sys);
+ *         -1 = auto (clockwise when the buffer is landscape).
+ * `g_out` receives the geometry used, for the reply fields. */
+static int fb_pgm(int rotate, char **out, size_t *len, int *w_out, int *h_out, fbgeo *g_out,
+                  char *err, size_t errn) {
+    const char *dev = fb_dev();
+    int fd = open(dev, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) {
+        snprintf(err, errn, "read %s: %s", dev, strerror(errno));
         return -1;
     }
-    stride = read_sys(sys, "stride", s, sizeof s) == 0 ? atoi(s) : 0;
-    if (stride <= 0) stride = fw * (bpp >= 8 ? bpp / 8 : 1);
-    if (fw <= 0 || fh <= 0 || fw > 8192 || fh > 8192) {
-        snprintf(err, errn, "bad framebuffer size %dx%d", fw, fh);
+    fbgeo g;
+    if (fb_geometry(fd, &g, err, errn) != 0) {
+        close(fd);
         return -1;
     }
-    size_t raw_len = (size_t)stride * (size_t)fh;
+    *g_out = g;
+    /* Read the whole virtual buffer, then cut out the visible (panned) window. */
+    size_t raw_len = (size_t)g.line * (size_t)g.vyres;
     unsigned char *raw = malloc(raw_len);
+    unsigned char *vrow = malloc((size_t)g.vxres);
+    int fw = g.xres, fh = g.yres;
     unsigned char *gray = malloc((size_t)fw * (size_t)fh);
-    if (!raw || !gray) {
+    if (!raw || !vrow || !gray) {
         free(raw);
+        free(vrow);
         free(gray);
+        close(fd);
         snprintf(err, errn, "oom");
         return -1;
     }
-    int fd = open(dev, O_RDONLY | O_CLOEXEC);
     size_t got = 0;
-    if (fd >= 0) {
-        while (got < raw_len) {
-            ssize_t r = read(fd, raw + got, raw_len - got);
-            if (r < 0 && errno == EINTR) continue;
-            if (r <= 0) break;
-            got += (size_t)r;
-        }
-        close(fd);
+    while (got < raw_len) {
+        ssize_t r = read(fd, raw + got, raw_len - got);
+        if (r < 0 && errno == EINTR) continue;
+        if (r <= 0) break;
+        got += (size_t)r;
     }
-    if (fd < 0 || got < raw_len) {
-        snprintf(err, errn, "read %s: %s", dev, fd < 0 ? strerror(errno) : "short read");
+    close(fd);
+    /* At least the visible lines must be there; pans wrap within what was read. */
+    size_t need = (size_t)g.line * (size_t)g.yres;
+    if (got < need) {
+        snprintf(err, errn, "read %s: short read (%zu of %zu bytes)", dev, got, need);
         free(raw);
+        free(vrow);
         free(gray);
         return -1;
     }
+    int rows_avail = (int)(got / (size_t)g.line);
     for (int y = 0; y < fh; y++) {
-        if (gray_row(raw + (size_t)y * (size_t)stride, bpp, fw, gray + (size_t)y * (size_t)fw) != 0) {
-            snprintf(err, errn, "unsupported depth %d", bpp);
+        int vy = (y + g.yoff) % rows_avail;
+        if (gray_row(raw + (size_t)vy * (size_t)g.line, g.bpp, g.vxres, vrow) != 0) {
+            snprintf(err, errn, "unsupported depth %d", g.bpp);
             free(raw);
+            free(vrow);
             free(gray);
             return -1;
         }
+        unsigned char *dst = gray + (size_t)y * (size_t)fw;
+        for (int x = 0; x < fw; x++) dst[x] = vrow[(x + g.xoff) % g.vxres];
     }
     free(raw);
+    free(vrow);
 
     if (rotate < 0) rotate = fw > fh ? 1 : 0;
     int w = (rotate == 1 || rotate == 3) ? fh : fw;
@@ -689,6 +777,7 @@ static int handle(int fd, char *line) {
         free(pgm);
         return rc;
     }
+    if (!strcmp(cmd, "fbinfo")) return cmd_fbinfo(fd);
     if (!strcmp(cmd, "fbshot")) {
         const char *mode = argc > 1 ? argv[1] : "auto";
         int rot = !strcmp(mode, "auto") ? -1 : !strcmp(mode, "raw") ? 0
@@ -697,9 +786,12 @@ static int handle(int fd, char *line) {
         char *pgm, err[160] = "";
         size_t len;
         int w, h;
-        if (fb_pgm(rot, &pgm, &len, &w, &h, err, sizeof err) != 0) return reply_err(fd, "%s", err);
-        char extra[64];
-        snprintf(extra, sizeof extra, "width=%d height=%d source=fb", w, h);
+        fbgeo g;
+        if (fb_pgm(rot, &pgm, &len, &w, &h, &g, err, sizeof err) != 0)
+            return reply_err(fd, "%s", err);
+        char extra[160];
+        snprintf(extra, sizeof extra, "width=%d height=%d source=fb geo=%s xoffset=%d yoffset=%d",
+                 w, h, g.source, g.xoff, g.yoff);
         int rc = reply_ok(fd, pgm, len, extra);
         free(pgm);
         return rc;

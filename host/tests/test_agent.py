@@ -87,6 +87,22 @@ class AgentTest(IsolatedState):
         with self.assertRaisesRegex(PbtkError, "fbshot mode"):
             self.client.request("fbshot sideways")
 
+    def test_fbshot_follows_pan(self):
+        # The visible window starts at the pan offset and wraps round the buffer.
+        (self.app.fb_sys / "pan").write_text("2,1\n")
+        info = self.client.fbinfo()
+        self.assertEqual((info["source"], info["xoffset"], info["yoffset"]), ("sysfs", "2", "1"))
+        raw = self.client.fbshot("raw")
+        for y in range(FB_H):
+            for x in range(FB_W):
+                self.assertEqual(raw.at(x, y), fb_pixel((x + 2) % FB_W, (y + 1) % FB_H))
+
+    def test_fbinfo_unpanned(self):
+        info = self.client.fbinfo()
+        self.assertEqual(info["xres"], str(FB_W))
+        self.assertEqual(info["line_length"], "8")
+        self.assertEqual(info["xoffset"], "0")
+
     def test_fbshot_missing_device(self):
         self.app.fb.unlink()
         with self.assertRaisesRegex(PbtkError, "read .*fb0"):

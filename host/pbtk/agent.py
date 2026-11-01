@@ -210,6 +210,11 @@ class AgentClient:
         _, body = self.request(f"fbshot {rotate}")
         return parse_pgm(body)
 
+    def fbinfo(self) -> dict:
+        """Framebuffer geometry as the driver reports it (resolution, virtual size, pan)."""
+        _, body = self.request("fbinfo")
+        return dict(l.split("=", 1) for l in body.decode().splitlines() if "=" in l)
+
     def tap(self, x: int, y: int, hold_ms: int = 60) -> dict:
         return self.request(f"tap {int(x)} {int(y)} {int(hold_ms)}")[0]
 

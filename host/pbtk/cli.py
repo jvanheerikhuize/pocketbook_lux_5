@@ -143,6 +143,11 @@ def cmd_info(args):
         print(f"{k:<12} {v}")
 
 
+def cmd_fbinfo(args):
+    for k, v in _dev(args).agent.fbinfo().items():
+        print(f"{k:<15} {v}")
+
+
 def cmd_shot(args):
     img, path = _dev(args).screenshot(out=Path(args.output) if args.output else None,
                                       whole=args.whole, rotate=args.rotate)
@@ -269,6 +274,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("discover", cmd_discover, "listen for agent beacons on the LAN")
     sp.add_argument("--timeout", type=float, default=6.0)
     add("info", cmd_info, "running app and screen, via agent")
+    add("fbinfo", cmd_fbinfo, "framebuffer geometry from the driver (for `shot --whole`)")
     sp = add("shot", cmd_shot, "screenshot of the running app (PNG)")
     sp.add_argument("-o", "--output")
     sp.add_argument("-w", "--whole", action="store_true",
