@@ -182,6 +182,36 @@ class Device:
             return a.ls(path), "agent"
         raise PbtkError("neither USB storage nor an agent is reachable")
 
+    def push(self, local: Path, device_path: str) -> tuple[list[str], str]:
+        """Copy a file or folder to the reader: USB storage when mounted, else the
+        agent (files written as they are). Returns (device paths written, via)."""
+        local = Path(local)
+        if not local.exists():
+            raise PbtkError(f"{local} does not exist")
+
+        def run():
+            u = self.usb_or_none()
+            if u:
+                changed = u.push(local, device_path)
+                u.sync()
+                return changed, "usb"
+            a = self.agent
+            if local.is_file():
+                a.put(device_path, local.read_bytes())
+                return [device_path], "agent"
+            written = []
+            for f in sorted(p for p in local.rglob("*") if p.is_file()):
+                dst = device_path.rstrip("/") + "/" + f.relative_to(local).as_posix()
+                a.put(dst, f.read_bytes())
+                written.append(dst)
+            return written, "agent"
+
+        result, _, _ = self._act("push", {"to": device_path}, run, False, 0)
+        return result
+
+    def calibrate(self, on: bool = True) -> None:
+        self._act("calibrate", {"on": on}, lambda: self.agent.calibrate(on), False, 0)
+
     def read_file(self, path: str) -> bytes:
         u = self.usb_or_none()
         if u:

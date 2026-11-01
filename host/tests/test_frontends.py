@@ -141,7 +141,8 @@ class McpTest(IsolatedState):
         self.assertEqual(init["result"]["serverInfo"]["name"], "pbtk")
         self.assertIsNone(self.server.handle({"jsonrpc": "2.0", "method": "notifications/initialized"}))
         names = {t["name"] for t in self.rpc("tools/list")["result"]["tools"]}
-        self.assertTrue({"pb_screenshot", "pb_tap", "pb_key", "pb_logs", "pb_deploy"} <= names)
+        self.assertTrue({"pb_screenshot", "pb_tap", "pb_key", "pb_logs", "pb_deploy", "pb_restart",
+                         "pb_fbinfo", "pb_calibrate", "pb_push"} <= names)
 
     def test_screenshot_and_tap_return_images(self):
         r = self.rpc("tools/call", {"name": "pb_screenshot", "arguments": {}})["result"]
@@ -161,6 +162,26 @@ class McpTest(IsolatedState):
         img = [c for c in r["content"] if c["type"] == "image"][0]
         self.assertEqual(png_size(base64.b64decode(img["data"])), (4, 6))
         self.assertEqual(activity.read(0)[0][-1]["args"], {"whole": True})
+
+    def test_fbinfo_calibrate_and_push(self):
+        r = self.rpc("tools/call", {"name": "pb_fbinfo", "arguments": {}})["result"]
+        self.assertFalse(r["isError"])
+        self.assertIn("virtual", r["content"][0]["text"])
+        r = self.rpc("tools/call", {"name": "pb_calibrate", "arguments": {}})["result"]
+        self.assertFalse(r["isError"], r)
+        r = self.rpc("tools/call", {"name": "pb_calibrate", "arguments": {"on": False}})["result"]
+        self.assertFalse(r["isError"], r)
+        self.assertEqual([e["action"] for e in activity.read(0)[0]][-2:], ["calibrate", "calibrate"])
+        # No USB mount in tests: push goes through the agent, folders included.
+        src = self.tmp / "levels"
+        (src / "sub").mkdir(parents=True)
+        (src / "a.txt").write_bytes(b"a")
+        (src / "sub" / "b.txt").write_bytes(b"b")
+        dst = str(self.app.dir / "levels")
+        r = self.rpc("tools/call", {"name": "pb_push", "arguments": {"local": str(src), "device_path": dst}})
+        self.assertFalse(r["result"]["isError"], r)
+        self.assertTrue(r["result"]["content"][0]["text"].startswith("2 file(s) written via agent"))
+        self.assertEqual((self.app.dir / "levels" / "sub" / "b.txt").read_bytes(), b"b")
 
     def test_errors_are_tool_errors(self):
         r = self.rpc("tools/call", {"name": "pb_key", "arguments": {"name": "bogus"}})["result"]
