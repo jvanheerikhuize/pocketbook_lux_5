@@ -1,0 +1,9 @@
+# What `pbtk deploy` / `pbtk logs` need to know about this app.
+[app]
+name = "pbtk-demo"
+# Built with `make pocketbook`; copied to applications/ on the reader as is.
+dist = "dist/applications"
+# Log file inside the bundle, read over USB (`pbtk logs`) or live (agent `log`).
+log = "pbtk-demo/pbtk-demo.log"
+# Command that builds the bundle; `pbtk deploy --build` runs it first.
+build = "make pocketbook"
