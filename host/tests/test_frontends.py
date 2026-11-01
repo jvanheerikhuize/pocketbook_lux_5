@@ -19,7 +19,7 @@ from pbtk.gui.server import make_server
 from pbtk.image import png_size
 from pbtk.mcp import Server, serve
 
-from support import BUTTON1, ROOT, DemoApp, IsolatedState
+from support import BUTTON1, BUTTON2, ROOT, DemoApp, IsolatedState
 
 
 class GuiTest(IsolatedState):
@@ -278,6 +278,20 @@ class ScenarioTest(IsolatedState):
         with self.assertRaisesRegex(PbtkError, "did not change within 500 ms"):
             self.run_script(f"tap {x + 10} {y + 10}\nexpect-change 500\n")
         self.assertFalse(self.steps[-1]["ok"])
+
+    def test_expect_screen_and_differs(self):
+        x, y, w, h = BUTTON1
+        box = f"{x} {y} {w} {h}"
+        self.run_script("shot before\nexpect-screen before\n")
+        self.assertEqual(self.steps[1]["diff_pct"], 0)
+        # Tapping button 1 fills it: that box differs, button 2 does not.
+        x2, y2, w2, h2 = BUTTON2
+        self.run_script(f"tap {x + 10} {y + 10}\nwait 300\nexpect-differs before 50 {box}\n"
+                        f"expect-screen before 0 {x2} {y2} {w2} {h2}\n")
+        with self.assertRaisesRegex(PbtkError, "differs from before.png"):
+            self.run_script(f"expect-screen before 1 {box}\n")
+        with self.assertRaisesRegex(PbtkError, "no reference screen"):
+            self.run_script("expect-screen nothing\n")
 
     def test_stops_when_the_player_touches_the_reader(self):
         x, y, _, _ = BUTTON1

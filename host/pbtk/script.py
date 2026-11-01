@@ -7,6 +7,12 @@ One command per line; `#` starts a comment:
     expect-log TEXT    (waits up to 10 s for TEXT to appear in the app log)
     expect-change [MS] (waits up to MS, default 4000, for the panel to change
                         after the last input; the time it took is reported)
+    expect-screen REF [MAX_PCT] [X Y W H]
+                       (the screen, or that box of it, matches REF: a `shot`
+                        name from this run or a PNG file; at most MAX_PCT,
+                        default 2, of the pixels differ)
+    expect-differs REF [MIN_PCT] [X Y W H]
+                       (at least MIN_PCT, default 10, of the pixels differ)
     note TEXT          (a line on the shared timeline, e.g. the scenario step)
     write PATH TEXT    (write a small text file on the reader, e.g. app settings)
     restart            (restart the app in place and wait for its agent)
@@ -28,6 +34,7 @@ from pathlib import Path
 
 from . import PbtkError, activity
 from .device import Device
+from .image import diff_pct, read_png_gray
 
 
 def to_script(entries: list[dict]) -> str:
@@ -130,6 +137,20 @@ def run(dev: Device, text: str, out_dir: Path | None = None, echo=print,
                     time.sleep(0.05)
                 step["ms"] = round((time.monotonic() - sent) * 1000)
                 echo(f"     panel changed after {step['ms']} ms")
+            elif cmd in ("expect-screen", "expect-differs"):
+                ref_path = Path(args[0]) if args[0].endswith(".png") else (out_dir or Path(".")) / f"{args[0]}.png"
+                if not ref_path.exists():
+                    raise PbtkError(f"line {n}: no reference screen {ref_path}")
+                ref = read_png_gray(ref_path.read_bytes())
+                same = cmd == "expect-screen"
+                limit = float(args[1]) if len(args) > 1 else (2.0 if same else 10.0)
+                box = tuple(int(a) for a in args[2:6]) if len(args) >= 6 else None
+                pct = diff_pct(dev.agent.shot().turned(dev.view), ref, box)
+                step["diff_pct"] = round(pct, 2)
+                echo(f"     {pct:.2f}% differs from {ref_path.name}")
+                if (pct > limit) if same else (pct < limit):
+                    raise PbtkError(f"line {n}: screen {'differs from' if same else 'matches'} {ref_path.name} "
+                                    f"({pct:.2f}% of pixels differ, {'max' if same else 'min'} {limit}%)")
             elif cmd == "shot":
                 name = (args[0] if args else f"shot-{n}") + ".png"
                 target = (out_dir / name) if out_dir else None

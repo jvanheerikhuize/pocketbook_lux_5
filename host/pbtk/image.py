@@ -1,4 +1,4 @@
-"""Tiny image helpers (stdlib only): PGM parsing, raw framebuffer decoding, PNG writing."""
+"""Tiny image helpers (stdlib only): PGM parsing, raw framebuffer decoding, PNG writing and reading."""
 
 from __future__ import annotations
 
@@ -124,3 +124,58 @@ def png_size(data: bytes) -> tuple[int, int]:
     if data[:8] != b"\x89PNG\r\n\x1a\n":
         raise ValueError("not a PNG")
     return struct.unpack(">II", data[16:24])
+
+
+def read_png_gray(data: bytes) -> Gray:
+    """Decode an 8-bit grayscale PNG (as png_gray writes; all row filters)."""
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ValueError("not a PNG")
+    pos, idat, width = 8, b"", 0
+    while pos < len(data):
+        n, kind = struct.unpack(">I4s", data[pos:pos + 8])
+        body = data[pos + 8:pos + 8 + n]
+        if kind == b"IHDR":
+            width, height, depth, color, _, _, interlace = struct.unpack(">IIBBBBB", body)
+            if (depth, color, interlace) != (8, 0, 0):
+                raise ValueError("only 8-bit grayscale, non-interlaced PNGs are supported")
+        elif kind == b"IDAT":
+            idat += body
+        pos += 12 + n
+    raw = zlib.decompress(idat)
+    out = bytearray(width * height)
+    prev = bytearray(width)
+    for y in range(height):
+        f = raw[y * (width + 1)]
+        row = bytearray(raw[y * (width + 1) + 1:(y + 1) * (width + 1)])
+        for x in range(width):
+            a = row[x - 1] if x else 0
+            b = prev[x]
+            c = prev[x - 1] if x else 0
+            if f == 1:
+                row[x] = (row[x] + a) & 0xFF
+            elif f == 2:
+                row[x] = (row[x] + b) & 0xFF
+            elif f == 3:
+                row[x] = (row[x] + (a + b) // 2) & 0xFF
+            elif f == 4:
+                pa, pb, pc = abs(b - c), abs(a - c), abs(a + b - 2 * c)
+                row[x] = (row[x] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 0xFF
+        out[y * width:(y + 1) * width] = row
+        prev = row
+    return Gray(width, height, bytes(out))
+
+
+def diff_pct(a: Gray, b: Gray, box: tuple[int, int, int, int] | None = None, tol: int = 24) -> float:
+    """Percent of pixels (in box x, y, w, h) differing by more than tol gray levels."""
+    if (a.width, a.height) != (b.width, b.height):
+        raise ValueError(f"sizes differ: {a.width}x{a.height} vs {b.width}x{b.height}")
+    x0, y0, w, h = box or (0, 0, a.width, a.height)
+    x0, y0 = max(0, x0), max(0, y0)
+    x1, y1 = min(a.width, x0 + w), min(a.height, y0 + h)
+    n = diff = 0
+    for y in range(y0, y1):
+        ra = a.pixels[y * a.width + x0:y * a.width + x1]
+        rb = b.pixels[y * b.width + x0:y * b.width + x1]
+        diff += sum(1 for p, q in zip(ra, rb) if abs(p - q) > tol)
+        n += x1 - x0
+    return 100 * diff / n if n else 0.0
