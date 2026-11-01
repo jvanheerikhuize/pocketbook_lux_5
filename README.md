@@ -47,8 +47,10 @@ pbtk probe collect    # summary + ~/.local/state/pbtk/facts.json + fb0.png
 
 ```sh
 cd ~/Repos/mmIV       # has a pbtk.toml
-pbtk deploy --build --eject     # build, copy, write the agent token, eject
+pbtk deploy --build --eject     # first time: build, copy over USB, write the agent token, eject
 # open the app on the reader (Wi-Fi on)
+pbtk deploy --wifi --restart --build   # from then on: send changed files, restart in place, no taps
+pbtk restart          # restart the running app (same pid, binary from disk)
 pbtk shot             # → PNG path;  pbtk tap X Y --shot;  pbtk key back
 pbtk shot --whole     # the whole panel (/dev/fb0): firmware menus, dialogs, keyboard
 pbtk logs -f          # live app log
@@ -98,7 +100,7 @@ you switch it off.
    {"mcpServers": {"pocketbook": {"command": "pbtk", "args": ["mcp"]}}}
    ```
    Tools: `pb_screenshot`, `pb_tap`, `pb_long_press`, `pb_swipe`, `pb_key`,
-   `pb_logs`, `pb_user_events`, `pb_deploy`, `pb_eject`, `pb_ls`, `pb_read_file`,
+   `pb_logs`, `pb_user_events`, `pb_deploy` (USB or `wifi`+`restart`), `pb_restart`, `pb_eject`, `pb_ls`, `pb_read_file`,
    `pb_probe_collect`, `pb_status`, `pb_activity`, `pb_refresh`, `pb_exit_app`.
 
 `templates/app/` is a complete starter app with all of the above.

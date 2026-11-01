@@ -17,7 +17,7 @@ The first line of every connection must be `auth <token>`; anything else gets
 | Command | Reply payload / fields | Notes |
 |---|---|---|
 | `ping` | — | |
-| `info` | `key=value` lines: agent, app, pid, port, width, height, depth, orientation, model, firmware, bundle, log | |
+| `info` | `key=value` lines: agent, app, pid, port, width, height, depth, orientation, model, firmware, bundle, log, build, started | `build` = compile date/time of the agent, `started` = unix ms when `pbagent_start` ran (changes on `restart`) |
 | `shot` | binary PGM (P5, 8-bit), fields `width height` | the app's canvas (what InkView draws), not `/dev/fb0` |
 | `fbshot [auto\|raw\|cw\|ccw]` | binary PGM, fields `width height source=fb` | the whole panel from `/dev/fb0` (firmware UI, InkView dialogs, on-screen keyboard). `auto` turns a landscape buffer 90° clockwise = the PB628 as held. `$PBAGENT_FB` / `$PBAGENT_FB_SYS` override the device and its sysfs dir |
 | `tap X Y [HOLD_MS=60]` | field `dispatched=1/0` | `EVT_POINTERDOWN`, then `EVT_POINTERUP` after HOLD_MS |
@@ -28,11 +28,13 @@ The first line of every connection must be `auth <token>`; anything else gets
 | `event TYPE P1 P2` | `dispatched` | raw InkView event (escape hatch) |
 | `refresh` | `dispatched` | `FullUpdate()` on the main thread |
 | `exit` | — | `CloseApp()` 100 ms later |
+| `restart` | — | 150 ms later on the main thread: `EVT_EXIT` to the app's handler, `pbagent_stop()`, then `execv("/proc/self/exe", argv)` — same pid, the executable now on disk. Poll `info` until `started` changes |
 | `events SINCE` | lines `seq ms type p1 p2`; fields `next now` | input the *user* gave (via `pbagent_observe`); injected events are excluded |
 | `log OFFSET [MAX]` | log bytes; fields `size offset` | negative OFFSET = from the end; offset past the end restarts at 0 (log truncated) |
 | `ls PATH` | lines `d|f size mtime name` | |
 | `get PATH` | file bytes (≤ 64 MB) | |
-| `put PATH LEN` + LEN bytes | — | written to `PATH.pbtk-tmp`, then renamed |
+| `put PATH LEN` + LEN bytes | — | written to `PATH.pbtk-tmp`, then renamed (so a running executable can be replaced); missing parent folders are created |
+| `sum PATH` | `CRC32HEX SIZE`, or `missing` | CRC-32 as `zlib.crc32`; `pbtk deploy --wifi` sends only files whose sum differs |
 
 Paths are limited to `/mnt/ext1`, `/mnt/ext2`, `/tmp` and the app bundle, may
 not contain `..` segments or spaces.
