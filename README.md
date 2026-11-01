@@ -76,8 +76,12 @@ you switch it off.
    ```c
    pbagent_observe(type, p1, p2);                     // first line of the handler
    if (type == EVT_INIT) { pbagent_config c = {.app_name = "mmiv"}; pbagent_start(&c); }
+   if (type == EVT_SHOW) SetPanelType(PANEL_DISABLED); // see below
    if (type == EVT_EXIT) pbagent_stop();
    ```
+   **Turn the firmware status panel off** on every `EVT_SHOW`. Otherwise the
+   reader shows your whole picture 75 px lower, wrapped round, so the bottom
+   rows appear at the top (docs/FACTS.md). The agent logs a warning if you forget.
    `pbagent_log("...")` writes to `<bundle>/<app>.log`, which `pbtk logs` and the
    GUI stream. Wi-Fi must be on; set `.connect_wifi = 1` to have the agent call
    `NetConnect(NULL)` on start.

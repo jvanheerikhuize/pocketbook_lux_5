@@ -43,6 +43,14 @@ class AgentTest(IsolatedState):
         self.assertEqual(info["app"], "pbtk-demo")
         self.assertEqual((info["width"], info["height"], info["depth"]), ("758", "1024", "8"))
         self.assertEqual(info["model"], "host-stub")
+        # The demo turns the firmware status panel off, so canvas == panel.
+        self.assertEqual((info["panel_type"], info["panel_fb_offset"]), ("0", "0"))
+
+    def test_no_panel_warning_for_demo(self):
+        time.sleep(3.5)
+        self.client.ping()
+        time.sleep(0.5)
+        self.assertNotIn(b"status panel is on", self.app.log.read_bytes())
 
     def test_shot_tap_changes_pixels(self):
         x, y = inside(BUTTON1)

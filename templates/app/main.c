@@ -110,6 +110,11 @@ static int handler(int type, int p1, int p2) {
         break;
     }
     case EVT_SHOW:
+        /* The firmware status panel is on unless the app turns it off, and
+         * while on it moves the whole picture down by its height (75 px on
+         * PB628 FW 6.9) with wrap-around. The firmware may restore it when
+         * the app comes back to the foreground, so do this on every show. */
+        SetPanelType(PANEL_DISABLED);
         draw_all();
         break;
     case EVT_POINTERUP: {

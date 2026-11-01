@@ -94,6 +94,16 @@ char *GetDeviceModel(void);
 char *GetSoftwareVersion(void);
 int NetConnect(const char *name);
 
+/* Firmware status panel. On the reader it is on unless the app disables it,
+ * and while on it shifts the app's picture on the panel by its height with
+ * wrap-around (confirmed on PB628 FW 6.9: 75 px). */
+#define PANEL_DISABLED 0
+#define PANEL_ENABLED (1 << 1)
+void SetPanelType(int type);
+int GetPanelType(void);
+int PanelHeight(void);
+int PanelHeightFBOffset(void);
+
 void ClearScreen(void);
 void FillArea(int x, int y, int w, int h, int color);
 void DrawRect(int x, int y, int w, int h, int color);

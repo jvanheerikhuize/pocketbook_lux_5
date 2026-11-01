@@ -35,6 +35,11 @@ on 6.9 is unconfirmed.
   the agent's `fbshot` command (`pbtk shot --whole`, MCP `whole: true`, GUI
   "whole screen") includes InkView dialogs, the on-screen keyboard and
   firmware overlays, not only the app canvas.
+- The first `fbshot` of the demo was 75 px off from `shot`. `pbtk calibrate`
+  and a look at the panel showed `fbshot` was right: the firmware status panel
+  (on unless the app disables it) moves the picture with wrap-around. Fixed in
+  the template (`SetPanelType(PANEL_DISABLED)` on `EVT_SHOW`); the agent now
+  reports `panel_*` in `info` and warns in the log.
 - `/sbin/dropbear` ships with the firmware → a user-level SSH shell on a high
   port from an `.app` is worth a test before reaching for PBJB.
 

@@ -155,6 +155,12 @@ int GetOrientation(void) { return 0; }
 void SetOrientation(int n) { (void)n; }
 char *GetDeviceModel(void) { return "host-stub"; }
 char *GetSoftwareVersion(void) { return "stub"; }
+static int panel_type = PANEL_ENABLED; /* on by default, as on the reader */
+void SetPanelType(int type) { panel_type = type; }
+int GetPanelType(void) { return panel_type; }
+int PanelHeight(void) { return panel_type ? 75 : 0; }
+int PanelHeightFBOffset(void) { return panel_type ? 75 : 0; }
+
 int NetConnect(const char *name) {
     (void)name;
     return 0;

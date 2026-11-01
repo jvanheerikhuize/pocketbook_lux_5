@@ -209,8 +209,23 @@ static void dispatch(const qitem *it) {
     A.dispatching = 0;
 }
 
+static long started_ms;
+
+/* Once, a few seconds in: the status panel silently moves the picture. */
+static void check_panel(void) {
+    static int checked;
+    if (checked || now_ms() - started_ms < 3000) return;
+    checked = 1;
+    if (GetPanelType() != PANEL_DISABLED && PanelHeightFBOffset() > 0)
+        pbagent_log("pbagent: WARNING the firmware status panel is on (type %d): the panel shows "
+                    "the canvas moved down %d px with wrap-around. Call SetPanelType(PANEL_DISABLED) "
+                    "on EVT_SHOW, or use `pbtk shot --whole` to see the real panel.",
+                    GetPanelType(), PanelHeightFBOffset());
+}
+
 static void tick(void) {
     if (!A.running) return;
+    check_panel();
     for (;;) {
         qitem it;
         int found = 0;
@@ -656,12 +671,17 @@ static int inject(int fd, qitem *items, int n) {
 static int cmd_info(int fd) {
     char buf[1024];
     icanvas *c = GetCanvas();
+    /* panel_*: the firmware status panel. While it is on, the panel shows the
+     * canvas moved by panel_fb_offset rows with wrap-around, so `shot` (canvas)
+     * and what the person sees differ; `fbshot` is then the faithful one. */
     int n = snprintf(buf, sizeof buf,
                      "agent=%s\napp=%s\npid=%d\nport=%d\nwidth=%d\nheight=%d\ndepth=%d\n"
-                     "orientation=%d\nmodel=%s\nfirmware=%s\nbundle=%s\nlog=%s\n",
+                     "orientation=%d\nmodel=%s\nfirmware=%s\nbundle=%s\nlog=%s\n"
+                     "panel_type=%d\npanel_height=%d\npanel_fb_offset=%d\n",
                      PBAGENT_VERSION, A.app_name, (int)getpid(), A.port, c ? c->width : 0,
                      c ? c->height : 0, c ? c->depth : 0, GetOrientation(), A.model,
-                     A.firmware, pbagent_bundle_dir(), A.log_path);
+                     A.firmware, pbagent_bundle_dir(), A.log_path, GetPanelType(), PanelHeight(),
+                     PanelHeightFBOffset());
     return reply_ok(fd, buf, (size_t)n, NULL);
 }
 
@@ -1074,6 +1094,7 @@ int pbagent_start(const pbagent_config *cfg) {
         pbagent_log("pbagent: thread: %s", strerror(errno));
         return -1;
     }
+    started_ms = now_ms();
     SetHardTimer("pbagent", tick, TICK_IDLE_MS);
     pbagent_log("pbagent: listening on port %d (app %s)", A.port, A.app_name);
     return 0;
