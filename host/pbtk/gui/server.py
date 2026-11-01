@@ -237,8 +237,13 @@ def make_handler(app: App):
                     return self._json({"ok": True, "shot": path.name})
                 elif u.path == "/api/deploy":
                     proj = project.load(b.get("project") or None)
+                    if b.get("wifi"):
+                        r = d.deploy_wifi(proj, build=bool(b.get("build")), restart=bool(b.get("restart")))
+                        return self._json({"ok": True, "app": proj.name, "via": "wifi", **r})
                     changed = d.deploy(proj, build=bool(b.get("build")), eject=bool(b.get("eject")))
-                    return self._json({"ok": True, "changed": changed, "app": proj.name})
+                    return self._json({"ok": True, "changed": changed, "app": proj.name, "via": "usb"})
+                elif u.path == "/api/restart":
+                    return self._json({"ok": True, **d.restart_app()})
                 elif u.path == "/api/eject":
                     return self._json({"ok": True, "device": d.eject()})
                 elif u.path == "/api/connect":

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import subprocess
 import time
+import zlib
 from pathlib import Path
 
 from . import PbtkError, activity, agent as agent_mod, paths
@@ -14,6 +15,9 @@ from .usb import UsbStorage, find_mount
 
 
 class Device:
+    #: where bundles live on the reader (a test points this at a temp dir)
+    apps_root = "/mnt/ext1/applications"
+
     def __init__(self, source: str = "cli", agent_addr: str | None = None,
                  discover_timeout: float = 4.0):
         self.source = source
@@ -151,12 +155,7 @@ class Device:
     def deploy(self, project: Project, build: bool = False, eject: bool = False) -> list[str]:
         def run():
             if build:
-                if not project.build:
-                    raise PbtkError("pbtk.toml has no [app] build command")
-                r = subprocess.run(project.build, shell=True, cwd=project.root,
-                                   capture_output=True, text=True)
-                if r.returncode != 0:
-                    raise PbtkError(f"build failed:\n{(r.stdout + r.stderr)[-3000:]}")
+                self._build(project)
             u = self.usb
             u.install_token(paths.token())
             changed = u.deploy(project.dist)
@@ -167,6 +166,65 @@ class Device:
         changed, _, _ = self._act("deploy", {"app": project.name, "build": build, "eject": eject},
                                   run, False, 0, guard=False)
         return changed
+
+    def deploy_wifi(self, project: Project, build: bool = False, restart: bool = False) -> dict:
+        """Copy changed files of the bundle through the running app's agent, and
+        optionally restart that app in place. No USB, no taps on the reader."""
+        def run():
+            if build:
+                self._build(project)
+            if not project.dist.is_dir():
+                raise PbtkError(f"nothing to deploy: {project.dist} does not exist (build first)")
+            a = self.agent
+            info = a.info()
+            if restart and info.get("app") != project.name:
+                raise PbtkError(f"the running app is {info.get('app')!r}, not {project.name!r}: "
+                                "restart only replaces the app that is running")
+            if restart and "started" not in info:
+                raise PbtkError("the running app's agent is too old to restart itself: deploy without "
+                                "--restart, then reopen the app once on the reader")
+            has_sum = "started" in info  # sum and restart arrived together
+            changed, unchanged = [], 0
+            for f in sorted(p for p in project.dist.rglob("*") if p.is_file()):
+                dev_path = f"{self.apps_root}/" + f.relative_to(project.dist).as_posix()
+                data = f.read_bytes()
+                want = (zlib.crc32(data), len(data))
+                if has_sum and a.sum(dev_path) == want:
+                    unchanged += 1
+                    continue
+                a.put(dev_path, data)
+                if has_sum and a.sum(dev_path) != want:
+                    raise PbtkError(f"verification failed after writing {dev_path}")
+                changed.append(dev_path)
+            result = {"changed": changed, "unchanged": unchanged, "restarted": False}
+            if restart:
+                a.restart()
+                back = a.wait_restarted(info.get("started", ""))
+                result.update(restarted=True, pid_kept=back.get("pid") == info.get("pid"),
+                              build=back.get("build"))
+            return result
+
+        result, _, _ = self._act("deploy", {"app": project.name, "via": "wifi", "build": build,
+                                            "restart": restart}, run, False, 0)
+        return result
+
+    def restart_app(self) -> dict:
+        def run():
+            a = self.agent
+            before = a.info()
+            a.restart()
+            back = a.wait_restarted(before.get("started", ""))
+            return {"pid_kept": back.get("pid") == before.get("pid"), "build": back.get("build")}
+
+        result, _, _ = self._act("restart", {}, run, False, 0)
+        return result
+
+    def _build(self, project: Project) -> None:
+        if not project.build:
+            raise PbtkError("pbtk.toml has no [app] build command")
+        r = subprocess.run(project.build, shell=True, cwd=project.root, capture_output=True, text=True)
+        if r.returncode != 0:
+            raise PbtkError(f"build failed:\n{(r.stdout + r.stderr)[-3000:]}")
 
     def eject(self) -> str:
         dev, _, _ = self._act("eject", {}, lambda: self.usb.eject(), False, 0, guard=False)
@@ -196,6 +254,7 @@ def _short(v) -> str | None:
     if isinstance(v, (list, tuple)):
         return f"{len(v)} item(s)"
     if isinstance(v, dict):
-        return " ".join(f"{k}={val}" for k, val in v.items()) or None
+        return " ".join(f"{k}={len(val) if isinstance(val, list) else val}"
+                        for k, val in v.items()) or None
     s = str(v)
     return s if len(s) < 300 else s[:300] + "…"

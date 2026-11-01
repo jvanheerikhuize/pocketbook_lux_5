@@ -146,9 +146,11 @@ label { display: inline-flex; gap: 5px; align-items: center; }
       <div class="field"><input type="text" id="project" placeholder="project folder with pbtk.toml, e.g. ~/Repos/mmIV"></div>
       <div class="row" style="margin:0 0 10px">
         <label><input type="checkbox" id="dep-build"> build first</label>
+        <label><input type="checkbox" id="dep-wifi"> over Wi-Fi</label>
+        <label><input type="checkbox" id="dep-restart"> restart app</label>
         <label><input type="checkbox" id="dep-eject" checked> eject afterwards</label>
         <span class="spacer"></span>
-        <button class="primary" id="deploy">Deploy</button><button id="eject">Eject</button>
+        <button class="primary" id="deploy">Deploy</button><button id="restart">Restart app</button><button id="eject">Eject</button>
       </div>
       <div class="field"><input type="text" id="agent-addr" placeholder="agent address (blank = discover), e.g. 192.168.1.40:8628"><button id="connect">Connect</button></div>
       <pre id="deploy-out"></pre>
@@ -341,12 +343,19 @@ $("#files-go").onclick = () => files();
 $("#project").value = store.get("pbtk.project", "");
 $("#deploy").onclick = async () => {
   store.set("pbtk.project", $("#project").value); $("#deploy-out").textContent = "deploying…";
-  try { const r = await api("/api/deploy", { project: $("#project").value, build: $("#dep-build").checked, eject: $("#dep-eject").checked });
-    $("#deploy-out").textContent = `deployed ${r.app}: ${r.changed.length} file(s) changed\n` + r.changed.join("\n") +
-      ($("#dep-eject").checked ? "\n\nejected — open the app on the reader" : "");
+  const wifi = $("#dep-wifi").checked;
+  try { const r = await api("/api/deploy", { project: $("#project").value, build: $("#dep-build").checked,
+      eject: !wifi && $("#dep-eject").checked, wifi, restart: wifi && $("#dep-restart").checked });
+    $("#deploy-out").textContent = `deployed ${r.app} over ${wifi ? "Wi-Fi" : "USB"}: ${r.changed.length} file(s) changed` +
+      (wifi ? `, ${r.unchanged} unchanged` : "") + "\n" + r.changed.join("\n") +
+      (r.restarted ? `\n\nrestarted in place (pid kept: ${r.pid_kept ? "yes" : "no"}, build ${r.build})` : "") +
+      (!wifi && $("#dep-eject").checked ? "\n\nejected — open the app on the reader" : "");
   } catch (e) { $("#deploy-out").textContent = e.message; }
   status();
 };
+$("#dep-wifi").onchange = () => { $("#dep-eject").disabled = $("#dep-wifi").checked; $("#dep-restart").disabled = !$("#dep-wifi").checked; };
+$("#dep-wifi").onchange();
+$("#restart").onclick = () => api("/api/restart", {}).then((r) => { toast(`restarted (build ${r.build})`); status(); }).catch((e) => toast(e.message));
 $("#eject").onclick = () => api("/api/eject", {}).then((r) => { toast("ejected " + r.device); status(); }).catch((e) => toast(e.message));
 $("#connect").onclick = () => api("/api/connect", { address: $("#agent-addr").value }).then((r) => {
   toast(r.ok ? "connected" : "no agent found"); status().then(loadShot); }).catch((e) => toast(e.message));

@@ -60,11 +60,15 @@ TOOLS = [
           {"path": {"type": "string", "default": "/mnt/ext1/applications"}}),
     _tool("pb_read_file", "Read a text file from the reader (first 200 kB).",
           {"path": {"type": "string"}}, ["path"]),
-    _tool("pb_deploy", "Copy a project's built bundle (pbtk.toml) to the reader over USB; optionally build "
-          "first and eject so the user can open the app.",
+    _tool("pb_deploy", "Copy a project's built bundle (pbtk.toml) to the reader. wifi=true sends only changed "
+          "files through the running app's agent and, with restart=true, restarts that app in place "
+          "so the new build runs with no taps on the reader. Otherwise USB storage; eject=true then "
+          "unmounts so the user can open the app.",
           {"project": {"type": "string", "description": "dir containing pbtk.toml"},
-           "build": {"type": "boolean", "default": False}, "eject": {"type": "boolean", "default": False}},
+           "build": {"type": "boolean", "default": False}, "eject": {"type": "boolean", "default": False},
+           "wifi": {"type": "boolean", "default": False}, "restart": {"type": "boolean", "default": False}},
           ["project"]),
+    _tool("pb_restart", "Restart the running app in place (same pid; loads the executable on disk)."),
     _tool("pb_eject", "Unmount the reader so it leaves PC-link mode and apps can run."),
     _tool("pb_probe_collect", "Read the probe app's device facts from USB storage (after the user ran it)."),
     _tool("pb_activity", "Recent entries of the shared timeline (Claude, the user in the GUI, and the device).",
@@ -140,11 +144,23 @@ class Server:
             return [_text(data.decode("utf-8", "replace"))]
         if name == "pb_deploy":
             proj = project.load(a["project"])
+            if a.get("wifi"):
+                r = d.deploy_wifi(proj, build=a.get("build", False), restart=a.get("restart", False))
+                msg = (f"deployed {proj.name} over Wi-Fi: {len(r['changed'])} changed, "
+                       f"{r['unchanged']} unchanged")
+                if r["restarted"]:
+                    msg += f"; restarted in place (pid kept: {r['pid_kept']}, build {r['build']})"
+                return [_text(msg + "\n" + "\n".join(r["changed"]))]
+            if a.get("restart"):
+                raise PbtkError("restart needs wifi=true (over USB the app cannot run)")
             changed = d.deploy(proj, build=a.get("build", False), eject=a.get("eject", False))
             msg = f"deployed {proj.name}: {len(changed)} file(s) changed"
             if a.get("eject"):
                 msg += "; ejected — ask the user to open the app on the reader"
             return [_text(msg + "\n" + "\n".join(changed[:50]))]
+        if name == "pb_restart":
+            r = d.restart_app()
+            return [_text(f"restarted in place (pid kept: {r['pid_kept']}, build {r['build']})")]
         if name == "pb_eject":
             return [_text(f"ejected {d.eject()}")]
         if name == "pb_probe_collect":

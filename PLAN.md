@@ -63,9 +63,13 @@ on 6.9 is unconfirmed.
    so the GUI shows Claude's actions (orange), yours (green) and taps made on
    the reader itself (purple). "I'm driving" blocks Claude's input. Sessions
    can be saved as replayable scripts (`pbtk run`).
-5. **T2** (optional, after the probe) — PBJB install guide, `pbagentd` system
+5. **Wi-Fi deploy** — `pbtk deploy --wifi [--restart]`: CRC-32 compare (`sum`), `put`
+   only changed files, then `restart` re-execs the app in place (`/proc/self/exe`,
+   same pid). After the first USB install no taps on the reader are needed.
+   Also in the GUI (Deploy tab) and MCP (`pb_deploy wifi/restart`, `pb_restart`).
+6. **T2** (optional, after the probe) — PBJB install guide, `pbagentd` system
    daemon (fb0 + input devices), SSH transport, remote app launch.
-6. **Adoption** — mmIV links libpbagent in its ScummVM backend and gets a
+7. **Adoption** — mmIV links libpbagent in its ScummVM backend and gets a
    `pbtk.toml`; inkquest moves to `sdk/pocketbook.mk`.
 
 ## Risks

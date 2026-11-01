@@ -45,6 +45,10 @@
 #define Q_FULLUPDATE (-1)
 #define Q_CLOSEAPP (-2)
 #define Q_CALIBRATE (-3)
+#define Q_RESTART (-4)
+
+static void do_restart(void);
+static long long started_unix_ms;
 
 /* Calibration pattern: shows on the panel itself where the canvas edges land.
  * Black bars along the top and bottom (CAL_BAR px), thin black edges left and
@@ -189,6 +193,54 @@ static void arm_timer(void) {
     SetHardTimer("pbagent", tick, active ? TICK_ACTIVE_MS : TICK_IDLE_MS);
 }
 
+/* ---- restart in place (pbtk deploy --wifi --restart) ----
+ * Replace the running image with the executable on disk, keeping the pid (so
+ * the firmware's task manager still sees the same app), the arguments, the
+ * environment and the working directory. Order: the app gets EVT_EXIT so it
+ * can save, the agent closes its sockets, then exec. All our fds are
+ * close-on-exec; InkView's own descriptors are whatever the firmware made them. */
+
+static void do_restart(void) {
+    char *argv[32];
+    static char cmdline[4096];
+    int argc = 0;
+    FILE *f = fopen("/proc/self/cmdline", "rb");
+    size_t n = f ? fread(cmdline, 1, sizeof cmdline - 1, f) : 0;
+    if (f) fclose(f);
+    cmdline[n] = 0;
+    for (size_t i = 0; i < n && argc < 31; i += strlen(cmdline + i) + 1) argv[argc++] = cmdline + i;
+    argv[argc] = NULL;
+    if (argc == 0) {
+        pbagent_log("pbagent: restart failed: cannot read /proc/self/cmdline");
+        return;
+    }
+    /* Exec the *path*, not /proc/self/exe: after a deploy renamed a new file
+     * over ours, /proc/self/exe still names the old (deleted) inode, and the
+     * kernel would happily run the old build again. */
+    static char exe[PATH_MAX];
+    ssize_t len = readlink("/proc/self/exe", exe, sizeof exe - 1);
+    if (len <= 0) {
+        snprintf(exe, sizeof exe, "/proc/self/exe");
+    } else {
+        exe[len] = 0;
+        static const char deleted[] = " (deleted)";
+        size_t dl = sizeof deleted - 1;
+        if ((size_t)len > dl && strcmp(exe + len - dl, deleted) == 0) exe[len - dl] = 0;
+    }
+    pbagent_log("pbagent: restarting in place (pid %d, exec %s as %s)", (int)getpid(), exe, argv[0]);
+    iv_handler h = GetEventHandler();
+    if (h) {
+        A.dispatching = 1;
+        h(EVT_EXIT, 0, 0); /* the app saves; it normally calls pbagent_stop() here */
+        A.dispatching = 0;
+    }
+    pbagent_stop();
+    execv(exe, argv);
+    pbagent_log("pbagent: restart exec %s failed: %s; trying /proc/self/exe", exe, strerror(errno));
+    execv("/proc/self/exe", argv);
+    pbagent_log("pbagent: restart exec failed: %s", strerror(errno));
+}
+
 static void dispatch(const qitem *it) {
     if (it->type == Q_FULLUPDATE) {
         FullUpdate();
@@ -201,6 +253,10 @@ static void dispatch(const qitem *it) {
     if (it->type == Q_CALIBRATE) {
         draw_calibration();
         return;
+    }
+    if (it->type == Q_RESTART) {
+        do_restart();
+        return; /* only reached when exec failed */
     }
     iv_handler h = GetEventHandler();
     if (!h) return;
@@ -677,11 +733,12 @@ static int cmd_info(int fd) {
     int n = snprintf(buf, sizeof buf,
                      "agent=%s\napp=%s\npid=%d\nport=%d\nwidth=%d\nheight=%d\ndepth=%d\n"
                      "orientation=%d\nmodel=%s\nfirmware=%s\nbundle=%s\nlog=%s\n"
-                     "panel_type=%d\npanel_height=%d\npanel_fb_offset=%d\n",
+                     "panel_type=%d\npanel_height=%d\npanel_fb_offset=%d\n"
+                     "build=%s %s\nstarted=%lld\n",
                      PBAGENT_VERSION, A.app_name, (int)getpid(), A.port, c ? c->width : 0,
                      c ? c->height : 0, c ? c->depth : 0, GetOrientation(), A.model,
                      A.firmware, pbagent_bundle_dir(), A.log_path, GetPanelType(), PanelHeight(),
-                     PanelHeightFBOffset());
+                     PanelHeightFBOffset(), __DATE__, __TIME__, started_unix_ms);
     return reply_ok(fd, buf, (size_t)n, NULL);
 }
 
@@ -776,6 +833,57 @@ static int cmd_get(int fd, const char *path) {
     return rc;
 }
 
+/* CRC-32 (IEEE, as zlib.crc32), table-driven. */
+static unsigned long crc32_update(unsigned long crc, const unsigned char *p, size_t n) {
+    static unsigned long table[256];
+    static int ready;
+    if (!ready) {
+        for (unsigned long i = 0; i < 256; i++) {
+            unsigned long c = i;
+            for (int k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320UL ^ (c >> 1) : c >> 1;
+            table[i] = c;
+        }
+        ready = 1;
+    }
+    crc ^= 0xFFFFFFFFUL;
+    while (n--) crc = table[(crc ^ *p++) & 0xFF] ^ (crc >> 8);
+    return crc ^ 0xFFFFFFFFUL;
+}
+
+/* `sum PATH` → payload "crc32hex size" (or "missing"), so the host only sends changed files. */
+static int cmd_sum(int fd, const char *path) {
+    if (!path_allowed(path)) return reply_err(fd, "path not allowed");
+    FILE *f = fopen(path, "rb");
+    if (!f) {
+        if (errno == ENOENT) return reply_ok(fd, "missing", 7, NULL);
+        return reply_err(fd, "%s", strerror(errno));
+    }
+    unsigned char buf[16384];
+    unsigned long crc = 0;
+    long long size = 0;
+    size_t n;
+    while ((n = fread(buf, 1, sizeof buf, f)) > 0) {
+        crc = crc32_update(crc, buf, n);
+        size += (long long)n;
+    }
+    fclose(f);
+    char out[64];
+    int len = snprintf(out, sizeof out, "%08lx %lld", crc & 0xFFFFFFFFUL, size);
+    return reply_ok(fd, out, (size_t)len, NULL);
+}
+
+/* mkdir -p for the parents of `path` (which is already allowed). */
+static void mkdir_parents(const char *path) {
+    char tmp[PATH_MAX];
+    snprintf(tmp, sizeof tmp, "%s", path);
+    for (char *p = tmp + 1; *p; p++) {
+        if (*p != '/') continue;
+        *p = 0;
+        mkdir(tmp, 0755);
+        *p = '/';
+    }
+}
+
 static int cmd_put(int fd, const char *path, long len) {
     if (len < 0 || len > (64L << 20)) return reply_err(fd, "bad length");
     char *buf = malloc((size_t)(len ? len : 1));
@@ -790,10 +898,14 @@ static int cmd_put(int fd, const char *path, long len) {
     }
     char tmp[PATH_MAX];
     snprintf(tmp, sizeof tmp, "%s.pbtk-tmp", path);
+    mkdir_parents(path);
     FILE *f = fopen(tmp, "wb");
     int ok = f && fwrite(buf, 1, (size_t)len, f) == (size_t)len;
     if (f) ok = (fclose(f) == 0) && ok;
     free(buf);
+    /* Keep the mode of the file being replaced (an executable stays one). */
+    struct stat old;
+    if (ok && stat(path, &old) == 0) chmod(tmp, old.st_mode & 07777);
     if (!ok || rename(tmp, path) != 0) {
         unlink(tmp);
         return reply_err(fd, "write failed: %s", strerror(errno));
@@ -901,6 +1013,13 @@ static int handle(int fd, char *line) {
         if (enqueue(q, 1) < 0) return reply_err(fd, "queue full");
         return reply_ok(fd, NULL, 0, NULL);
     }
+    if (!strcmp(cmd, "restart")) {
+        qitem q[1] = {{0, 0, Q_RESTART, 0, 0}};
+        q[0].due_ms = now_ms() + 150; /* let the reply leave first */
+        if (enqueue(q, 1) < 0) return reply_err(fd, "queue full");
+        return reply_ok(fd, NULL, 0, NULL);
+    }
+    if (!strcmp(cmd, "sum") && argc >= 2) return cmd_sum(fd, argv[1]);
     if (!strcmp(cmd, "events")) return cmd_events(fd, argc > 1 ? atol(argv[1]) : 0);
     if (!strcmp(cmd, "log"))
         return cmd_log(fd, argc > 1 ? atol(argv[1]) : 0, argc > 2 ? atol(argv[2]) : 0);
@@ -968,6 +1087,7 @@ static void *acceptor_thread(void *arg) {
         if (r <= 0 || !A.running) continue;
         int fd = accept(A.listen_fd, NULL, NULL);
         if (fd < 0) continue;
+        fcntl(fd, F_SETFD, FD_CLOEXEC); /* nothing of ours survives a restart */
         pthread_mutex_lock(&client_lock);
         int slot = -1;
         for (int i = 0; i < MAX_CLIENTS; i++)
@@ -1095,6 +1215,9 @@ int pbagent_start(const pbagent_config *cfg) {
         return -1;
     }
     started_ms = now_ms();
+    struct timespec wall;
+    clock_gettime(CLOCK_REALTIME, &wall);
+    started_unix_ms = (long long)wall.tv_sec * 1000LL + wall.tv_nsec / 1000000L;
     SetHardTimer("pbagent", tick, TICK_IDLE_MS);
     pbagent_log("pbagent: listening on port %d (app %s)", A.port, A.app_name);
     return 0;
