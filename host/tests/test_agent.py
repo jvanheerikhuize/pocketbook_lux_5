@@ -169,6 +169,13 @@ class AgentTest(IsolatedState):
         self.assertEqual([e for e in events if e["type"].startswith(("pointer", "key"))], [])
         self.assertGreaterEqual(nxt, 0)
 
+    def test_keeps_the_reader_awake_while_connected(self):
+        self.client.ping()
+        deadline = time.time() + 3
+        while b"keeping the reader awake" not in self.app.log.read_bytes() and time.time() < deadline:
+            time.sleep(0.1)
+        self.assertIn(b"keeping the reader awake while a client is connected", self.app.log.read_bytes())
+
     def test_files_inside_bundle_only(self):
         p = str(self.app.dir / "note.txt")
         self.client.put(p, b"hello\n")
