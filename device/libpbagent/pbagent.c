@@ -214,8 +214,20 @@ static void do_restart(void) {
         pbagent_log("pbagent: restart failed: cannot read /proc/self/cmdline");
         return;
     }
-    pbagent_log("pbagent: restarting in place (pid %d, exec /proc/self/exe as %s)", (int)getpid(),
-                argv[0]);
+    /* Exec the *path*, not /proc/self/exe: after a deploy renamed a new file
+     * over ours, /proc/self/exe still names the old (deleted) inode, and the
+     * kernel would happily run the old build again. */
+    static char exe[PATH_MAX];
+    ssize_t len = readlink("/proc/self/exe", exe, sizeof exe - 1);
+    if (len <= 0) {
+        snprintf(exe, sizeof exe, "/proc/self/exe");
+    } else {
+        exe[len] = 0;
+        static const char deleted[] = " (deleted)";
+        size_t dl = sizeof deleted - 1;
+        if ((size_t)len > dl && strcmp(exe + len - dl, deleted) == 0) exe[len - dl] = 0;
+    }
+    pbagent_log("pbagent: restarting in place (pid %d, exec %s as %s)", (int)getpid(), exe, argv[0]);
     iv_handler h = GetEventHandler();
     if (h) {
         A.dispatching = 1;
@@ -223,6 +235,8 @@ static void do_restart(void) {
         A.dispatching = 0;
     }
     pbagent_stop();
+    execv(exe, argv);
+    pbagent_log("pbagent: restart exec %s failed: %s; trying /proc/self/exe", exe, strerror(errno));
     execv("/proc/self/exe", argv);
     pbagent_log("pbagent: restart exec failed: %s", strerror(errno));
 }
@@ -889,6 +903,9 @@ static int cmd_put(int fd, const char *path, long len) {
     int ok = f && fwrite(buf, 1, (size_t)len, f) == (size_t)len;
     if (f) ok = (fclose(f) == 0) && ok;
     free(buf);
+    /* Keep the mode of the file being replaced (an executable stays one). */
+    struct stat old;
+    if (ok && stat(path, &old) == 0) chmod(tmp, old.st_mode & 07777);
     if (!ok || rename(tmp, path) != 0) {
         unlink(tmp);
         return reply_err(fd, "write failed: %s", strerror(errno));

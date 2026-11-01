@@ -1,5 +1,6 @@
 """End to end: pbtk's client against the real libpbagent (demo app on the stub)."""
 
+import os
 import shutil
 import socket
 import time
@@ -201,6 +202,17 @@ class AgentTest(IsolatedState):
         self.assertNotEqual(after["started"], before["started"])
         self.assertIsNone(self.app.proc.poll())
         self.client.ping()
+
+    def test_restart_runs_the_replaced_binary(self):
+        # A deploy renames a new file over the running executable; restart must
+        # run that new file, not the old (deleted) inode /proc/self/exe names.
+        before = self.client.info()
+        self.client.put(str(self.app.exe), self.app.exe.read_bytes() + b"\0new build")
+        exe_link = f"/proc/{self.app.proc.pid}/exe"
+        self.assertIn("(deleted)", os.readlink(exe_link))
+        self.client.restart()
+        self.client.wait_restarted(before["started"], timeout=10)
+        self.assertNotIn("(deleted)", os.readlink(exe_link))
 
     def test_deploy_wifi_copies_changes_and_restarts(self):
         # A project whose dist mirrors the running bundle: <apps_root>/bundle/...
