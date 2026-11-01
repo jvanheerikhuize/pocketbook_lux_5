@@ -81,6 +81,26 @@ class UsbTest(IsolatedState):
         self.assertEqual(text.splitlines(), [f"line {i}" for i in range(95, 100)])
         self.assertTrue(where.startswith("usb"))
 
+    def test_deploy_keeps_saves_on_the_reader(self):
+        m = self.fake_mount()
+        proj_dir = self.tmp / "proj"
+        dist = proj_dir / "dist"
+        (dist / "game" / "saves").mkdir(parents=True)
+        (dist / "game" / "saves" / "slot.001").write_bytes(b"pc save")
+        (dist / "game" / "saves" / "slot.002").write_bytes(b"pc only")
+        (dist / "game" / "bin").write_bytes(b"new bin")
+        (proj_dir / "pbtk.toml").write_text(
+            '[app]\nname = "game"\ndist = "dist"\nkeep = ["game/saves/*"]\n')
+        proj = project.load(proj_dir)
+        on_reader = m / "applications" / "game" / "saves"
+        on_reader.mkdir(parents=True)
+        (on_reader / "slot.001").write_bytes(b"reader save, newer")
+        changed = Device(source="cli", discover_timeout=0).deploy(proj)
+        self.assertEqual(sorted(changed), ["/mnt/ext1/applications/game/bin",
+                                           "/mnt/ext1/applications/game/saves/slot.002"])
+        self.assertEqual((on_reader / "slot.001").read_bytes(), b"reader save, newer")
+        self.assertEqual((on_reader / "slot.002").read_bytes(), b"pc only")
+
     def test_deploy_without_build_output(self):
         self.fake_mount()
         (self.tmp / "p").mkdir()

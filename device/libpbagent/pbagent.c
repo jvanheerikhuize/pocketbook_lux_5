@@ -89,6 +89,7 @@ static struct {
     int running;
     char app_name[64];
     char log_path[PATH_MAX];
+    char restart_exec[PATH_MAX];
     char token[128];
     char bundle[PATH_MAX];
     char model[64];
@@ -235,6 +236,14 @@ static void do_restart(void) {
         A.dispatching = 0;
     }
     pbagent_stop();
+    if (A.restart_exec[0]) {
+        /* The app's launcher decides the command line afresh (e.g. which save
+         * to resume); it must `exec` the binary so the pid stays the same. */
+        pbagent_log("pbagent: restart via /bin/sh %s", A.restart_exec);
+        execl("/bin/sh", "sh", A.restart_exec, (char *)NULL);
+        pbagent_log("pbagent: restart via %s failed: %s; re-running the binary", A.restart_exec,
+                    strerror(errno));
+    }
     execv(exe, argv);
     pbagent_log("pbagent: restart exec %s failed: %s; trying /proc/self/exe", exe, strerror(errno));
     execv("/proc/self/exe", argv);
@@ -1157,6 +1166,9 @@ int pbagent_start(const pbagent_config *cfg) {
     if (A.running) return 0;
     if (!cfg || !cfg->app_name) return -1;
     snprintf(A.app_name, sizeof A.app_name, "%s", cfg->app_name);
+    snprintf(A.restart_exec, sizeof A.restart_exec, "%s", cfg->restart_exec ? cfg->restart_exec : "");
+    if (getenv("PBAGENT_RESTART_EXEC"))
+        snprintf(A.restart_exec, sizeof A.restart_exec, "%s", getenv("PBAGENT_RESTART_EXEC"));
     if (cfg->log_path)
         snprintf(A.log_path, sizeof A.log_path, "%s", cfg->log_path);
     else

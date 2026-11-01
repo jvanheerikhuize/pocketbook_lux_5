@@ -62,7 +62,7 @@ def cmd_deploy(args):
     if args.wifi:
         r = d.deploy_wifi(proj, build=args.build, restart=args.restart)
         print(f"deployed {proj.name} over Wi-Fi: {len(r['changed'])} file(s) changed, "
-              f"{r['unchanged']} unchanged")
+              f"{r['unchanged']} unchanged" + (f", {r['kept']} kept (on the reader already)" if r['kept'] else ""))
         for c in r["changed"]:
             print(f"  {c}")
         if r["restarted"]:

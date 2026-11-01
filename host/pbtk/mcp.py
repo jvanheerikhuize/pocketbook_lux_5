@@ -147,7 +147,7 @@ class Server:
             if a.get("wifi"):
                 r = d.deploy_wifi(proj, build=a.get("build", False), restart=a.get("restart", False))
                 msg = (f"deployed {proj.name} over Wi-Fi: {len(r['changed'])} changed, "
-                       f"{r['unchanged']} unchanged")
+                       f"{r['unchanged']} unchanged, {r['kept']} kept")
                 if r["restarted"]:
                     msg += f"; restarted in place (pid kept: {r['pid_kept']}, build {r['build']})"
                 return [_text(msg + "\n" + "\n".join(r["changed"]))]

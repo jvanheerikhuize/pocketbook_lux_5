@@ -7,3 +7,6 @@ dist = "dist/applications"
 log = "pbtk-demo/pbtk-demo.log"
 # Command that builds the bundle; `pbtk deploy --build` runs it first.
 build = "make pocketbook"
+# Files (globs relative to dist) copied only when the reader does not have
+# them yet, e.g. saves or settings the user changes on the device.
+# keep = ["pbtk-demo/saves/*"]

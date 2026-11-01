@@ -92,8 +92,9 @@ class UsbStorage:
         tmp.write_bytes(data)
         os.replace(tmp, p)
 
-    def push(self, local_path: Path, device_path: str) -> list[str]:
-        """Copy a file or tree; returns the device paths that changed."""
+    def push(self, local_path: Path, device_path: str, keep=None) -> list[str]:
+        """Copy a file or tree; returns the device paths that changed. keep(rel) → True:
+        that file is only copied when the reader does not have it yet."""
         src = Path(local_path)
         dst = self.local(device_path)
         changed: list[str] = []
@@ -101,6 +102,8 @@ class UsbStorage:
         for f in files:
             target = dst if src.is_file() else dst / f.relative_to(src)
             if _same(f, target):
+                continue
+            if keep and target.exists() and not src.is_file() and keep(f.relative_to(src).as_posix()):
                 continue
             target.parent.mkdir(parents=True, exist_ok=True)
             shutil.copyfile(f, target)  # FAT keeps no modes, so copy data + mtime only
@@ -125,12 +128,12 @@ class UsbStorage:
             out.append(t)
         return out
 
-    def deploy(self, dist: Path) -> list[str]:
+    def deploy(self, dist: Path, keep=None) -> list[str]:
         """Copy a built `applications/` tree (bundles + .app launchers) to the reader."""
         dist = Path(dist)
         if not dist.is_dir():
             raise PbtkError(f"nothing to deploy: {dist} does not exist (build first)")
-        changed = self.push(dist, "/mnt/ext1/applications")
+        changed = self.push(dist, "/mnt/ext1/applications", keep)
         self.sync()
         return changed
 
