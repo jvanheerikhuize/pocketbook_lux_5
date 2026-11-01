@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pbtk console</title>
+<style>
+:root {
+  --bg: #f4f2ee; --panel: #ffffff; --ink: #1d1c1a; --muted: #6b6862; --line: #dcd8d0;
+  --accent: #2f5d50; --accent-ink: #ffffff; --warn: #9a3b1f; --claude: #b4561f; --you: #2f5d50;
+  --device: #4a4a8a; --cli: #6b6862; --screen-bg: #e9e7e2;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #171716; --panel: #22211f; --ink: #ecebe7; --muted: #a29f98; --line: #3a3835;
+    --accent: #7fb8a6; --accent-ink: #10201b; --warn: #e48a6a; --claude: #e8915a; --you: #7fb8a6;
+    --device: #a3a3e6; --cli: #a29f98; --screen-bg: #2b2a28;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, sans-serif; }
+header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 16px;
+  border-bottom: 1px solid var(--line); background: var(--panel); position: sticky; top: 0; z-index: 2; }
+header h1 { font-size: 15px; margin: 0 8px 0 0; letter-spacing: .02em; }
+.pill { border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; font-size: 12px; color: var(--muted); }
+.pill.on { color: var(--ink); border-color: var(--accent); }
+.pill .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--line); margin-right: 5px; }
+.pill.on .dot { background: var(--accent); }
+.spacer { flex: 1; }
+button, input, select { font: inherit; color: inherit; }
+button { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.hold-on { background: var(--warn); color: #fff; border-color: var(--warn); }
+input[type=text] { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; min-width: 0; }
+main { display: grid; grid-template-columns: minmax(280px, 520px) 1fr; gap: 16px; padding: 16px; }
+@media (max-width: 860px) { main { grid-template-columns: 1fr; } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px; min-width: 0; }
+#screen-wrap { position: relative; background: var(--screen-bg); border-radius: 8px; overflow: hidden;
+  display: flex; align-items: center; justify-content: center; min-height: 300px; touch-action: none; user-select: none; }
+#screen { display: block; width: 100%; height: auto; image-rendering: auto; cursor: crosshair; }
+#screen.stale { opacity: .55; }
+#placeholder { color: var(--muted); padding: 40px 20px; text-align: center; max-width: 360px; }
+#overlay { position: absolute; inset: 0; pointer-events: none; }
+.mark { position: absolute; width: 34px; height: 34px; margin: -17px 0 0 -17px; border-radius: 50%;
+  border: 3px solid var(--you); animation: fade 1.6s ease-out forwards; }
+.mark.mcp { border-color: var(--claude); }
+.mark.device { border-color: var(--device); border-style: dashed; }
+.mark span { position: absolute; top: 34px; left: 50%; transform: translateX(-50%); font-size: 11px; font-weight: 600;
+  white-space: nowrap; background: var(--panel); padding: 0 4px; border-radius: 3px; }
+@keyframes fade { 0% { opacity: 1; transform: scale(.6); } 30% { transform: scale(1); } 100% { opacity: 0; } }
+.keys { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-top: 10px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; color: var(--muted); font-size: 12px; }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin: -4px -4px 10px; padding: 0 4px; }
+.tabs button { border: none; border-bottom: 2px solid transparent; border-radius: 0; background: none; padding: 6px 10px; color: var(--muted); }
+.tabs button.active { color: var(--ink); border-bottom-color: var(--accent); }
+.tab { display: none; } .tab.active { display: block; }
+#timeline { list-style: none; margin: 0; padding: 0; max-height: calc(100vh - 190px); overflow: auto; }
+#timeline li { display: grid; grid-template-columns: 64px 64px 1fr auto; gap: 8px; align-items: start;
+  padding: 7px 4px; border-bottom: 1px solid var(--line); }
+#timeline li.fail .what { color: var(--warn); }
+.t { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+.src { font-size: 11px; font-weight: 600; border-radius: 4px; padding: 1px 6px; text-align: center; color: #fff; }
+.src.mcp { background: var(--claude); } .src.gui { background: var(--you); } .src.device { background: var(--device); }
+.src.cli, .src.script { background: var(--cli); }
+.what { font-family: var(--mono); font-size: 12px; word-break: break-word; }
+.what small { display: block; color: var(--muted); font-family: inherit; }
+.thumb { width: 48px; border: 1px solid var(--line); border-radius: 3px; cursor: zoom-in; }
+pre { font-family: var(--mono); font-size: 12px; white-space: pre-wrap; word-break: break-word; margin: 0;
+  max-height: calc(100vh - 240px); overflow: auto; background: var(--bg); border-radius: 6px; padding: 8px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+td { padding: 4px 6px; border-bottom: 1px solid var(--line); }
+td.size { text-align: right; color: var(--muted); font-family: var(--mono); }
+a { color: var(--accent); cursor: pointer; text-decoration: none; }
+label { display: inline-flex; gap: 5px; align-items: center; }
+.field { display: flex; gap: 8px; margin-bottom: 8px; }
+.field input { flex: 1; }
+#toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg);
+  padding: 8px 14px; border-radius: 8px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: calc(100vw - 32px); }
+#toast.show { opacity: .95; }
+</style>
+</head>
+<body>
+<header>
+  <h1>pbtk console</h1>
+  <span class="pill" id="pill-usb"><span class="dot"></span>USB</span>
+  <span class="pill" id="pill-agent"><span class="dot"></span>agent</span>
+  <span class="spacer"></span>
+  <label title="Mirror refresh"><input type="checkbox" id="live" checked> live</label>
+  <button id="hold" title="Block Claude's input while you drive">I'm driving: off</button>
+</header>
+<main>
+  <section class="panel">
+    <div id="screen-wrap">
+      <img id="screen" alt="reader screen" hidden draggable="false">
+      <div id="placeholder">No app with the pbtk agent is reachable.<br><br>
+        Open an app built with libpbagent on the reader (Wi-Fi on, USB storage <em>not</em> mounted),
+        or run <code>pbtk sim</code> to try this console without the reader.</div>
+      <div id="overlay"></div>
+    </div>
+    <div class="keys">
+      <button data-key="prev">◀ Prev</button><button data-key="next">Next ▶</button>
+      <button data-key="back">Back</button><button data-key="home">Home</button>
+      <button data-key="up">▲</button><button data-key="down">▼</button>
+      <button data-key="ok">OK</button><button data-key="menu">Menu</button>
+    </div>
+    <div class="row">
+      <button id="btn-refresh">Full refresh</button>
+      <button id="btn-shot">Save screenshot</button>
+      <button id="btn-exit">Close app</button>
+      <span class="spacer"></span>
+      <span id="coords">—</span>
+    </div>
+    <div class="row">click = tap · drag = swipe · hold ≥ 0.6 s = long press</div>
+  </section>
+
+  <section class="panel">
+    <nav class="tabs">
+      <button data-tab="timeline" class="active">Timeline</button>
+      <button data-tab="log">Log</button>
+      <button data-tab="files">Files</button>
+      <button data-tab="deploy">Deploy</button>
+    </nav>
+    <div class="tab active" id="tab-timeline">
+      <div class="row" style="margin:0 0 8px">
+        <span class="src mcp">Claude</span><span class="src gui">You</span><span class="src device">On reader</span><span class="src cli">CLI</span>
+        <span class="spacer"></span>
+        <a id="save-script">Save as script</a>
+      </div>
+      <ul id="timeline"></ul>
+    </div>
+    <div class="tab" id="tab-log">
+      <div class="row" style="margin:0 0 8px"><span id="log-where">—</span><span class="spacer"></span>
+        <input type="text" id="log-path" placeholder="/mnt/ext1/applications/app/app.log (USB)">
+        <button id="log-load">Load</button></div>
+      <pre id="log"></pre>
+    </div>
+    <div class="tab" id="tab-files">
+      <div class="field"><input type="text" id="files-path" value="/mnt/ext1/applications"><button id="files-go">Open</button></div>
+      <div class="row" style="margin:0 0 6px" id="files-via"></div>
+      <table><tbody id="files"></tbody></table>
+    </div>
+    <div class="tab" id="tab-deploy">
+      <div class="field"><input type="text" id="project" placeholder="project folder with pbtk.toml, e.g. ~/Repos/mmIV"></div>
+      <div class="row" style="margin:0 0 10px">
+        <label><input type="checkbox" id="dep-build"> build first</label>
+        <label><input type="checkbox" id="dep-eject" checked> eject afterwards</label>
+        <span class="spacer"></span>
+        <button class="primary" id="deploy">Deploy</button><button id="eject">Eject</button>
+      </div>
+      <div class="field"><input type="text" id="agent-addr" placeholder="agent address (blank = discover), e.g. 192.168.1.40:8628"><button id="connect">Connect</button></div>
+      <pre id="deploy-out"></pre>
+    </div>
+  </section>
+</main>
+<div id="toast"></div>
+<script>
+const $ = (s) => document.querySelector(s);
+const store = { get(k, d) { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
+                set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+const LABEL = { mcp: "Claude", gui: "You", device: "On reader", cli: "CLI", script: "Script" };
+let screenSize = null, agentUp = false, hold = false, shotTimer = null, lastShot = 0;
+
+function toast(msg) { const t = $("#toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 3200); }
+
+async function api(path, body) {
+  const r = await fetch(path, body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const ct = r.headers.get("Content-Type") || "";
+  const data = ct.includes("json") ? await r.json() : await r.text();
+  if (!r.ok) throw new Error((data && data.error) || r.statusText);
+  return data;
+}
+
+// ---------------------------------------------------------------- status
+async function status() {
+  try {
+    const s = await api("/api/status");
+    $("#pill-usb").classList.toggle("on", !!s.usb);
+    $("#pill-usb").lastChild.textContent = s.usb ? `USB ${s.usb.mount}` : "USB: not mounted";
+    agentUp = !!(s.agent && !s.agent.error);
+    $("#pill-agent").classList.toggle("on", agentUp);
+    $("#pill-agent").lastChild.textContent = agentUp ? `${s.agent.app} @ ${s.agent.address}` : "agent: none";
+    setHold(!!s.hold, false);
+  } catch (e) { agentUp = false; }
+  if (!agentUp) { $("#screen").hidden = true; $("#placeholder").hidden = false; }
+}
+
+// ---------------------------------------------------------------- screen
+async function loadShot() {
+  if (!agentUp) return;
+  const img = $("#screen");
+  try {
+    const r = await fetch("/api/screen.png?t=" + Date.now());
+    if (!r.ok) throw new Error("no agent");
+    screenSize = [+r.headers.get("X-Width"), +r.headers.get("X-Height")];
+    const url = URL.createObjectURL(await r.blob());
+    img.onload = () => URL.revokeObjectURL(url);
+    img.src = url; img.hidden = false; img.classList.remove("stale"); $("#placeholder").hidden = true;
+    lastShot = Date.now();
+  } catch { img.classList.add("stale"); }
+}
+function scheduleShot(ms = 350) { clearTimeout(shotTimer); shotTimer = setTimeout(loadShot, ms); }
+setInterval(() => { if ($("#live").checked && Date.now() - lastShot > 2500) loadShot(); }, 1000);
+
+function toDevice(ev) {
+  const img = $("#screen"), r = img.getBoundingClientRect();
+  const w = screenSize ? screenSize[0] : img.naturalWidth, h = screenSize ? screenSize[1] : img.naturalHeight;
+  return [Math.round((ev.clientX - r.left) * w / r.width), Math.round((ev.clientY - r.top) * h / r.height)];
+}
+function mark(x, y, source) {
+  const img = $("#screen"); if (img.hidden || !screenSize) return;
+  const ir = img.getBoundingClientRect(), wr = $("#screen-wrap").getBoundingClientRect();
+  const m = document.createElement("div"); m.className = "mark " + source;
+  m.style.left = (ir.left - wr.left + x * ir.width / screenSize[0]) + "px";
+  m.style.top = (ir.top - wr.top + y * ir.height / screenSize[1]) + "px";
+  if (source !== "gui") { const s = document.createElement("span"); s.textContent = LABEL[source] || source; m.append(s); }
+  $("#overlay").append(m); setTimeout(() => m.remove(), 1700);
+}
+
+let down = null;
+$("#screen").addEventListener("pointerdown", (ev) => { ev.preventDefault(); down = { p: toDevice(ev), t: Date.now() };
+  $("#screen").setPointerCapture(ev.pointerId); });
+$("#screen").addEventListener("pointermove", (ev) => { const [x, y] = toDevice(ev); $("#coords").textContent = `${x}, ${y}`; });
+$("#screen").addEventListener("pointerup", async (ev) => {
+  if (!down) return; const [x, y] = toDevice(ev), [x0, y0] = down.p, dt = Date.now() - down.t; down = null;
+  try {
+    if (Math.hypot(x - x0, y - y0) > 24) await api("/api/swipe", { x1: x0, y1: y0, x2: x, y2: y, ms: Math.min(Math.max(dt, 150), 1500) });
+    else if (dt >= 600) await api("/api/long", { x, y });
+    else { mark(x, y, "gui"); await api("/api/tap", { x, y }); }
+    scheduleShot();
+  } catch (e) { toast(e.message); }
+});
+document.querySelectorAll("[data-key]").forEach((b) => b.addEventListener("click", async () => {
+  try { await api("/api/key", { name: b.dataset.key }); scheduleShot(); } catch (e) { toast(e.message); } }));
+$("#btn-refresh").onclick = () => api("/api/refresh", {}).then(() => scheduleShot(600)).catch((e) => toast(e.message));
+$("#btn-shot").onclick = () => api("/api/screenshot", {}).then((r) => toast("saved " + r.shot)).catch((e) => toast(e.message));
+$("#btn-exit").onclick = () => api("/api/exit", {}).then(() => toast("app asked to close")).catch((e) => toast(e.message));
+
+// ------------------------------------------------------------------ hold
+function setHold(on, send = true) {
+  hold = on; const b = $("#hold"); b.textContent = "I'm driving: " + (on ? "ON — Claude paused" : "off");
+  b.classList.toggle("hold-on", on);
+  if (send) api("/api/hold", { on }).catch((e) => toast(e.message));
+}
+$("#hold").onclick = () => setHold(!hold);
+
+// -------------------------------------------------------------- timeline
+function describe(e) {
+  const a = e.args || {};
+  if ("x" in a && "y" in a) return `${e.action} ${a.x}, ${a.y}`;
+  if (e.action === "swipe") return `swipe ${a.x1},${a.y1} → ${a.x2},${a.y2}`;
+  if (a.name) return `${e.action} ${a.name}`;
+  if (a.key) return `${e.action} ${a.key}`;
+  const rest = Object.keys(a).length ? " " + JSON.stringify(a) : "";
+  return e.action + rest;
+}
+function addEntry(e, live) {
+  const li = document.createElement("li"); if (e.ok === false) li.className = "fail";
+  const t = new Date(e.ts * 1000).toLocaleTimeString([], { hour12: false });
+  li.innerHTML = `<span class="t">${t}</span><span class="src ${e.source}">${LABEL[e.source] || e.source}</span>
+    <span class="what"></span><span></span>`;
+  li.querySelector(".what").textContent = describe(e);
+  if (e.result) { const s = document.createElement("small"); s.textContent = e.result; li.querySelector(".what").append(s); }
+  if (e.shot) { const im = document.createElement("img"); im.className = "thumb"; im.loading = "lazy";
+    im.src = "/api/shots/" + encodeURIComponent(e.shot); im.onclick = () => window.open(im.src, "_blank"); li.lastChild.append(im); }
+  const ul = $("#timeline"); ul.prepend(li); while (ul.children.length > 400) ul.lastChild.remove();
+  if (live) {
+    const a = e.args || {};
+    if (e.source !== "gui" && "x" in a) mark(a.x, a.y, e.source);
+    if (["tap", "long", "swipe", "key", "pointerup", "keypress", "refresh"].includes(e.action)) scheduleShot(e.source === "device" ? 500 : 300);
+    if (e.action === "hold") setHold(!!a.on, false);
+  }
+}
+async function timeline() {
+  const r = await api("/api/activity?since=-1"); r.entries.forEach((e) => addEntry(e, false));
+  const es = new EventSource("/api/stream?since=" + r.next);
+  es.onmessage = (m) => addEntry(JSON.parse(m.data), true);
+}
+$("#save-script").onclick = async () => {
+  const text = await api("/api/script?n=300&sources=gui,mcp,device");
+  const a = document.createElement("a"); a.href = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+  a.download = "session.pbtk"; a.click();
+};
+
+// ------------------------------------------------------------------ tabs
+document.querySelectorAll(".tabs button").forEach((b) => b.addEventListener("click", () => {
+  document.querySelectorAll(".tabs button, .tab").forEach((x) => x.classList.remove("active"));
+  b.classList.add("active"); $("#tab-" + b.dataset.tab).classList.add("active");
+  store.set("pbtk.tab", b.dataset.tab);
+  if (b.dataset.tab === "files" && !$("#files").children.length) files();
+}));
+const savedTab = store.get("pbtk.tab", "timeline"); document.querySelector(`.tabs [data-tab="${savedTab}"]`)?.click();
+
+// ------------------------------------------------------------------- log
+let logOffset = -16384;
+async function pollLog() {
+  if (!$("#tab-log").classList.contains("active") || !agentUp) return;
+  try {
+    const r = await api("/api/log?offset=" + logOffset); $("#log-where").textContent = r.where;
+    if (r.text) { const pre = $("#log"), atEnd = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 20;
+      pre.textContent = (logOffset < 0 ? "" : pre.textContent) + r.text;
+      if (pre.textContent.length > 400000) pre.textContent = pre.textContent.slice(-300000);
+      if (atEnd) pre.scrollTop = pre.scrollHeight; }
+    if (r.next !== null) logOffset = r.next;
+  } catch (e) { $("#log-where").textContent = e.message; }
+}
+setInterval(pollLog, 1000);
+$("#log-path").value = store.get("pbtk.logpath", "");
+$("#log-load").onclick = async () => {
+  store.set("pbtk.logpath", $("#log-path").value);
+  try { const r = await api("/api/log?path=" + encodeURIComponent($("#log-path").value) + "&project=" + encodeURIComponent($("#project").value));
+    $("#log-where").textContent = r.where; $("#log").textContent = r.text; } catch (e) { toast(e.message); }
+};
+
+// ----------------------------------------------------------------- files
+async function files(path) {
+  path = path || $("#files-path").value; $("#files-path").value = path;
+  try {
+    const r = await api("/api/files?path=" + encodeURIComponent(path)); $("#files-via").textContent = "via " + r.via;
+    const tb = $("#files"); tb.innerHTML = "";
+    const up = path.replace(/\/[^/]+\/?$/, "") || "/mnt/ext1";
+    const rows = [{ name: "..", dir: true, size: "", path: up }, ...r.entries.map((e) => ({ ...e, path: path.replace(/\/$/, "") + "/" + e.name }))];
+    for (const e of rows) {
+      const tr = document.createElement("tr"), a = document.createElement("a");
+      a.textContent = (e.dir ? "📁 " : "") + e.name;
+      if (e.dir) a.onclick = () => files(e.path); else a.href = "/api/file?path=" + encodeURIComponent(e.path);
+      const td1 = document.createElement("td"); td1.append(a);
+      const td2 = document.createElement("td"); td2.className = "size"; td2.textContent = e.dir ? "" : e.size.toLocaleString();
+      tr.append(td1, td2); tb.append(tr);
+    }
+  } catch (e) { toast(e.message); }
+}
+$("#files-go").onclick = () => files();
+
+// ---------------------------------------------------------------- deploy
+$("#project").value = store.get("pbtk.project", "");
+$("#deploy").onclick = async () => {
+  store.set("pbtk.project", $("#project").value); $("#deploy-out").textContent = "deploying…";
+  try { const r = await api("/api/deploy", { project: $("#project").value, build: $("#dep-build").checked, eject: $("#dep-eject").checked });
+    $("#deploy-out").textContent = `deployed ${r.app}: ${r.changed.length} file(s) changed\n` + r.changed.join("\n") +
+      ($("#dep-eject").checked ? "\n\nejected — open the app on the reader" : "");
+  } catch (e) { $("#deploy-out").textContent = e.message; }
+  status();
+};
+$("#eject").onclick = () => api("/api/eject", {}).then((r) => { toast("ejected " + r.device); status(); }).catch((e) => toast(e.message));
+$("#connect").onclick = () => api("/api/connect", { address: $("#agent-addr").value }).then((r) => {
+  toast(r.ok ? "connected" : "no agent found"); status().then(loadShot); }).catch((e) => toast(e.message));
+
+// ------------------------------------------------------------------ boot
+status().then(loadShot); timeline();
+setInterval(() => status().then(() => { if (agentUp && $("#screen").hidden) loadShot(); }), 4000);
+</script>
+</body>
+</html>
