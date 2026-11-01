@@ -144,11 +144,17 @@ class Device:
                          lambda: self.agent.swipe(*self.to_canvas(x1, y1), *self.to_canvas(x2, y2), ms),
                          shot_after, settle_ms)
 
-    def key(self, name: str, shot_after: bool = False, settle_ms: int = 400):
+    def key(self, name: str, shot_after: bool = False, settle_ms: int = 400, hold_ms: int = 80):
         name = name.lower()
         if name not in agent_mod.KEYS and not name.startswith("0x"):
             raise PbtkError(f"unknown key {name!r}; one of {', '.join(agent_mod.KEYS)}")
-        return self._act("key", {"name": name}, lambda: self.agent.key(name), shot_after, settle_ms)
+        args = {"name": name} if hold_ms == 80 else {"name": name, "hold_ms": hold_ms}
+        return self._act("key", args, lambda: self.agent.key(name, hold_ms), shot_after, settle_ms)
+
+    def write_text(self, path: str, text: str):
+        """A small text file on the reader (app settings for a scenario)."""
+        return self._act("write", {"path": path, "text": text.strip()[:80]},
+                         lambda: self.agent.put(path, text.encode()), False, 0)
 
     def refresh(self):
         return self._act("refresh", {}, self.agent.refresh, False, 0)
