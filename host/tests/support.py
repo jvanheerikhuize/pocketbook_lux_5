@@ -79,7 +79,7 @@ def build_demo() -> Path:
 class DemoApp:
     """The demo app with its agent, on a free localhost port."""
 
-    def __init__(self, workdir: Path, token: str = TOKEN):
+    def __init__(self, workdir: Path, token: str = TOKEN, env: dict | None = None):
         exe = build_demo()
         self.dir = workdir / "bundle"
         self.dir.mkdir(parents=True, exist_ok=True)
@@ -101,7 +101,7 @@ class DemoApp:
             for y in range(FB_H)))
         env = dict(os.environ, PBAGENT_TOKEN=token, PBAGENT_PORT=str(self.port),
                    PBTK_STUB_INPUT=str(self.input_file),
-                   PBAGENT_FB=str(self.fb), PBAGENT_FB_SYS=str(self.fb_sys))
+                   PBAGENT_FB=str(self.fb), PBAGENT_FB_SYS=str(self.fb_sys), **(env or {}))
         self.proc = subprocess.Popen([str(self.exe)], env=env, cwd=self.dir,
                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         deadline = time.monotonic() + 5

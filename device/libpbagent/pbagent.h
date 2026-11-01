@@ -44,6 +44,9 @@ typedef struct pbagent_config {
     int port;              /* 0 → PBAGENT_DEFAULT_PORT; $PBAGENT_PORT overrides */
     int connect_wifi;      /* 1 → call NetConnect(NULL) once on start (blocks briefly) */
     int no_beacon;         /* 1 → do not broadcast the UDP discovery beacon */
+    const char *restart_exec; /* `restart` runs this script with /bin/sh (e.g. the
+                              app's .app launcher, which must `exec` the binary);
+                              default: the current executable with the same argv */
 } pbagent_config;
 
 /* Start the agent. Main thread, usually on EVT_INIT. Returns 0 when listening,
