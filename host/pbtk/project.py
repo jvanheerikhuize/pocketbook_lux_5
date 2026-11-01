@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import fnmatch
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import PbtkError
@@ -18,6 +19,11 @@ class Project:
     dist: Path
     log: str | None  # device path
     build: str | None
+    #: globs (relative to dist, e.g. "mmiv/saves/*") only copied when missing on the reader
+    keep: list[str] = field(default_factory=list)
+
+    def kept(self, rel: str) -> bool:
+        return any(fnmatch.fnmatchcase(rel, pat) for pat in self.keep)
 
     @property
     def device_log(self) -> str | None:
@@ -55,4 +61,5 @@ def load(path_or_dir: Path | str | None = None) -> Project:
         dist=root / app.get("dist", "dist/applications"),
         log=log,
         build=app.get("build"),
+        keep=list(app.get("keep") or []),
     )

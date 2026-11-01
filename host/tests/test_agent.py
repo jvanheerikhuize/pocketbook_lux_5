@@ -214,6 +214,23 @@ class AgentTest(IsolatedState):
         self.client.wait_restarted(before["started"], timeout=10)
         self.assertNotIn("(deleted)", os.readlink(exe_link))
 
+    def test_restart_exec_runs_the_launcher(self):
+        # With restart_exec the app's launcher runs again (e.g. to pick the newest
+        # save); it execs the binary, so the pid stays the same.
+        self.client.close()
+        self.app.stop()
+        launcher = self.tmp / "launcher.sh"
+        marker = self.tmp / "launched"
+        launcher.write_text(f'#!/bin/sh\necho x >> "{marker}"\nexec "{self.app.dir}/pbtk-demo"\n')
+        self.app = DemoApp(self.tmp, env={"PBAGENT_RESTART_EXEC": str(launcher)})
+        self.client = AgentClient("127.0.0.1", self.app.port, TOKEN, timeout=5)
+        before = self.client.info()
+        self.client.restart()
+        after = self.client.wait_restarted(before["started"], timeout=10)
+        self.assertEqual(after["pid"], before["pid"])
+        self.assertEqual(marker.read_text(), "x\n")
+        self.assertIn(b"restart via /bin/sh", self.app.log.read_bytes())
+
     def test_deploy_wifi_copies_changes_and_restarts(self):
         # A project whose dist mirrors the running bundle: <apps_root>/bundle/...
         root = self.tmp / "proj"
@@ -235,6 +252,14 @@ class AgentTest(IsolatedState):
             # Second run: nothing to send.
             r = d.deploy_wifi(proj)
             self.assertEqual((r["changed"], r["unchanged"], r["restarted"]), ([], 2, False))
+            # keep: a file that exists on the reader is never overwritten; a missing one is copied.
+            (self.app.dir / "assets" / "level1.txt").write_bytes(b"edited on the reader\n")
+            (dist / "bundle" / "assets" / "level2.txt").write_bytes(b"two\n")
+            proj.keep = ["bundle/assets/*"]
+            r = d.deploy_wifi(proj)
+            self.assertEqual((r["changed"], r["kept"]), ([f"{self.tmp}/bundle/assets/level2.txt"], 1))
+            self.assertEqual((self.app.dir / "assets" / "level1.txt").read_bytes(), b"edited on the reader\n")
+            proj.keep = []
             # Restart refuses to replace a different app.
             other = Project(root=root, name="mmiv", dist=dist, log=None, build=None)
             with self.assertRaisesRegex(PbtkError, "running app is"):

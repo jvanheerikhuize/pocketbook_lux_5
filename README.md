@@ -86,7 +86,11 @@ you switch it off.
    rows appear at the top (docs/FACTS.md). The agent logs a warning if you forget.
    `pbagent_log("...")` writes to `<bundle>/<app>.log`, which `pbtk logs` and the
    GUI stream. Wi-Fi must be on; set `.connect_wifi = 1` to have the agent call
-   `NetConnect(NULL)` on start.
+   `NetConnect(NULL)` on start. Without a token on the reader the agent stays
+   off and never touches Wi-Fi, so release builds can keep it linked in.
+   If a launcher script decides the command line (mmIV picks the newest save),
+   set `.restart_exec = "<bundle>/../myapp.app"`: `pbtk restart` then runs that
+   script, which must `exec` the binary so the pid stays the same.
 3. **pbtk.toml** at the repo root:
    ```toml
    [app]
@@ -94,6 +98,7 @@ you switch it off.
    dist  = "dist/applications"      # what goes into applications/ on the reader
    log   = "mmiv/mmiv.log"          # relative to applications/
    build = "make pocketbook"
+   keep  = ["mmiv/saves/*"]         # copied only when missing: never overwrite saves
    ```
 4. **Claude Code** — `.mcp.json` in that repo:
    ```json

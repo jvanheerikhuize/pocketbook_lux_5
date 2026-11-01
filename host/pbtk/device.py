@@ -158,7 +158,7 @@ class Device:
                 self._build(project)
             u = self.usb
             u.install_token(paths.token())
-            changed = u.deploy(project.dist)
+            changed = u.deploy(project.dist, project.kept)
             if eject:
                 u.eject()
             return changed
@@ -184,19 +184,25 @@ class Device:
                 raise PbtkError("the running app's agent is too old to restart itself: deploy without "
                                 "--restart, then reopen the app once on the reader")
             has_sum = "started" in info  # sum and restart arrived together
-            changed, unchanged = [], 0
+            changed, unchanged, kept = [], 0, 0
             for f in sorted(p for p in project.dist.rglob("*") if p.is_file()):
-                dev_path = f"{self.apps_root}/" + f.relative_to(project.dist).as_posix()
+                rel = f.relative_to(project.dist).as_posix()
+                dev_path = f"{self.apps_root}/{rel}"
                 data = f.read_bytes()
                 want = (zlib.crc32(data), len(data))
-                if has_sum and a.sum(dev_path) == want:
+                have = a.sum(dev_path) if has_sum else None
+                if have == want:
                     unchanged += 1
+                    continue
+                # keep: never overwrite (e.g. saves); without `sum` we cannot tell, so skip.
+                if project.kept(rel) and (have is not None or not has_sum):
+                    kept += 1
                     continue
                 a.put(dev_path, data)
                 if has_sum and a.sum(dev_path) != want:
                     raise PbtkError(f"verification failed after writing {dev_path}")
                 changed.append(dev_path)
-            result = {"changed": changed, "unchanged": unchanged, "restarted": False}
+            result = {"changed": changed, "unchanged": unchanged, "kept": kept, "restarted": False}
             if restart:
                 a.restart()
                 back = a.wait_restarted(info.get("started", ""))

@@ -347,7 +347,7 @@ $("#deploy").onclick = async () => {
   try { const r = await api("/api/deploy", { project: $("#project").value, build: $("#dep-build").checked,
       eject: !wifi && $("#dep-eject").checked, wifi, restart: wifi && $("#dep-restart").checked });
     $("#deploy-out").textContent = `deployed ${r.app} over ${wifi ? "Wi-Fi" : "USB"}: ${r.changed.length} file(s) changed` +
-      (wifi ? `, ${r.unchanged} unchanged` : "") + "\n" + r.changed.join("\n") +
+      (wifi ? `, ${r.unchanged} unchanged` + (r.kept ? `, ${r.kept} kept` : "") : "") + "\n" + r.changed.join("\n") +
       (r.restarted ? `\n\nrestarted in place (pid kept: ${r.pid_kept ? "yes" : "no"}, build ${r.build})` : "") +
       (!wifi && $("#dep-eject").checked ? "\n\nejected — open the app on the reader" : "");
   } catch (e) { $("#deploy-out").textContent = e.message; }
