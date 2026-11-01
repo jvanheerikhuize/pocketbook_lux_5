@@ -99,14 +99,18 @@ you switch it off.
    log   = "mmiv/mmiv.log"          # relative to applications/
    build = "make pocketbook"
    keep  = ["mmiv/saves/*"]         # copied only when missing: never overwrite saves
+   view  = "ccw"                    # landscape app on the portrait panel: upright screenshots
    ```
+   `view` (or `--view`, `$PBTK_VIEW`) turns app screenshots in the CLI, GUI and
+   MCP; taps and swipes then take coordinates in the turned picture.
 4. **Claude Code** — `.mcp.json` in that repo:
    ```json
    {"mcpServers": {"pocketbook": {"command": "pbtk", "args": ["mcp"]}}}
    ```
    Tools: `pb_screenshot`, `pb_tap`, `pb_long_press`, `pb_swipe`, `pb_key`,
    `pb_logs`, `pb_user_events`, `pb_deploy` (USB or `wifi`+`restart`), `pb_restart`, `pb_eject`, `pb_ls`, `pb_read_file`,
-   `pb_probe_collect`, `pb_status`, `pb_activity`, `pb_refresh`, `pb_exit_app`.
+   `pb_push`, `pb_fbinfo`, `pb_calibrate`, `pb_probe_collect`, `pb_status`, `pb_activity`,
+   `pb_refresh`, `pb_exit_app`.
 
 `templates/app/` is a complete starter app with all of the above.
 

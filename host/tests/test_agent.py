@@ -283,6 +283,26 @@ class AgentTest(IsolatedState):
         self.assertEqual(self.app.proc.returncode, 0)
         self.assertIn(b"demo: exit", self.app.log.read_bytes())
 
+    def test_view_turns_shots_and_maps_taps(self):
+        cx, cy = inside(BUTTON1)  # a canvas point on button 1, off its label
+        for view, to_view in (("ccw", lambda x, y: (y, 758 - 1 - x)),
+                              ("cw", lambda x, y: (1024 - 1 - y, x))):
+            d = Device(source="cli", agent_addr=self.app.address, discover_timeout=0, view=view)
+            try:
+                before, _ = d.screenshot()
+                self.assertEqual((before.width, before.height), (1024, 758))
+                vx, vy = to_view(cx, cy)
+                self.assertEqual(d.to_canvas(vx, vy), (cx, cy))
+                self.assertEqual(before.at(vx, vy), 255)
+                d.tap(vx, vy)
+                time.sleep(0.2)
+                after, _ = d.screenshot()
+                self.assertEqual(after.at(vx, vy), 0, f"{view}: the tap toggled button 1")
+                d.tap(vx, vy)  # toggle back for the next view
+                time.sleep(0.2)
+            finally:
+                d.close()
+
     def test_device_facade_records_activity_and_shot(self):
         d = Device(source="mcp", agent_addr=self.app.address, discover_timeout=0)
         _, img, path = d.tap(*inside(BUTTON1, 150, 120), shot_after=True, settle_ms=50)

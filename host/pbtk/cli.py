@@ -15,7 +15,8 @@ from .device import Device
 
 
 def _dev(args, source="cli") -> Device:
-    return Device(source=source, agent_addr=args.agent, discover_timeout=args.discover)
+    return Device(source=source, agent_addr=args.agent, discover_timeout=args.discover,
+                  view=getattr(args, "view", None))
 
 
 def cmd_status(args):
@@ -131,16 +132,8 @@ def cmd_pull(args):
 
 
 def cmd_push(args):
-    d = _dev(args)
-    u = d.usb_or_none()
-    if u:
-        changed = u.push(Path(args.local), args.device_path)
-        u.sync()
-        print(f"{len(changed)} file(s) changed")
-    else:
-        d.agent.put(args.device_path, Path(args.local).read_bytes())
-        print("written via agent")
-    activity.record("cli", "push", {"to": args.device_path})
+    written, via = _dev(args).push(Path(args.local), args.device_path)
+    print(f"{len(written)} file(s) written via {via}")
 
 
 def cmd_discover(args):
@@ -165,10 +158,7 @@ def cmd_fbinfo(args):
 
 
 def cmd_calibrate(args):
-    d = _dev(args)
-    d._guard()
-    d.agent.calibrate(not args.off)
-    activity.record("cli", "calibrate", {"on": not args.off})
+    _dev(args).calibrate(not args.off)
     if not args.off:
         print("calibration pattern on the panel: black bars along the canvas top and bottom (50 px),")
         print("ruler blocks every 100 px (n blocks at n*100). `pbtk calibrate --off` restores the app.")
@@ -265,6 +255,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="pbtk", description="PocketBook toolkit")
     p.add_argument("--version", action="version", version=__version__)
     p.add_argument("--agent", help="agent HOST[:PORT] (default: $PBTK_AGENT, last seen, or discovery)")
+    p.add_argument("--view", choices=["none", "cw", "ccw"],
+                   help="turn app screenshots; taps use the same coordinates "
+                        "(default: $PBTK_VIEW or `view` in pbtk.toml)")
     p.add_argument("--discover", type=float, default=4.0, help="seconds to listen for agents (0 = never)")
     sub = p.add_subparsers(dest="cmd", required=True)
 

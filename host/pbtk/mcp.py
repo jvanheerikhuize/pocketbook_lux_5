@@ -15,6 +15,7 @@ import base64
 import json
 import sys
 import traceback
+from pathlib import Path
 
 from . import PbtkError, __version__, activity, probe, project
 from .device import Device
@@ -35,8 +36,8 @@ def _tool(name, description, props=None, required=None):
 TOOLS = [
     _tool("pb_status", "What is reachable: USB storage (deploy/logs) and the in-app agent (screen/input). "
           "Also says whether the user has taken control in the GUI."),
-    _tool("pb_screenshot", "Screenshot of the app running on the PocketBook (8-bit gray PNG, canvas coordinates "
-          "match pb_tap). whole=true captures the panel itself from /dev/fb0, so firmware menus, "
+    _tool("pb_screenshot", "Screenshot of the app running on the PocketBook (8-bit gray PNG; its coordinates "
+          "are what pb_tap/pb_swipe take, also when pbtk.toml turns it upright with `view`). whole=true captures the panel itself from /dev/fb0, so firmware menus, "
           "InkView dialogs and the on-screen keyboard are included.",
           {"whole": {"type": "boolean", "default": False},
            "rotate": {"type": "string", "enum": ["auto", "raw", "cw", "ccw"], "default": "auto"}}),
@@ -71,6 +72,17 @@ TOOLS = [
     _tool("pb_restart", "Restart the running app in place (same pid; loads the executable on disk)."),
     _tool("pb_eject", "Unmount the reader so it leaves PC-link mode and apps can run."),
     _tool("pb_probe_collect", "Read the probe app's device facts from USB storage (after the user ran it)."),
+    _tool("pb_fbinfo", "Framebuffer geometry as the driver reports it (resolution, virtual size, pan, "
+          "stride). Use when whole-screen shots look shifted or wrapped."),
+    _tool("pb_calibrate", "Draw an alignment pattern on the panel (black bars along the canvas top and "
+          "bottom, n ruler blocks at n*100 px) to check that pb_screenshot whole=true matches the "
+          "canvas. on=false lets the app repaint.",
+          {"on": {"type": "boolean", "default": True}}),
+    _tool("pb_push", "Copy a local file or folder to the reader (/mnt/ext1/...): USB storage when "
+          "mounted, else through the running app's agent. Use pb_deploy for app bundles.",
+          {"local": {"type": "string", "description": "local file or folder"},
+           "device_path": {"type": "string", "description": "destination on the reader"}},
+          ["local", "device_path"]),
     _tool("pb_activity", "Recent entries of the shared timeline (Claude, the user in the GUI, and the device).",
           {"n": {"type": "integer", "default": 30}}),
 ]
@@ -166,6 +178,16 @@ class Server:
         if name == "pb_probe_collect":
             result = probe.collect(d.usb)
             return [_text(probe.summary(result))]
+        if name == "pb_fbinfo":
+            return [_text(json.dumps(d.agent.fbinfo(), indent=2))]
+        if name == "pb_calibrate":
+            on = bool(a.get("on", True))
+            d.calibrate(on)
+            return [_text("calibration pattern on the panel; compare with pb_screenshot whole=true"
+                          if on else "calibration off; the app repaints")]
+        if name == "pb_push":
+            written, via = d.push(Path(a["local"]).expanduser(), a["device_path"])
+            return [_text(f"{len(written)} file(s) written via {via}\n" + "\n".join(written[:50]))]
         if name == "pb_activity":
             entries, _ = activity.read(activity.tail_offset(a.get("n", 30)), limit=a.get("n", 30))
             return [_text("\n".join(json.dumps(e) for e in entries))]
