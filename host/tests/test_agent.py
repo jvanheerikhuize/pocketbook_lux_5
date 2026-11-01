@@ -1,0 +1,168 @@
+"""End to end: pbtk's client against the real libpbagent (demo app on the stub)."""
+
+import socket
+import time
+import unittest
+
+from pbtk import PbtkError
+from pbtk.agent import AgentClient
+from pbtk.device import Device
+from pbtk import activity
+
+from support import BUTTON1, BUTTON2, TOKEN, DemoApp, IsolatedState
+
+
+def inside(rect, dx=40, dy=30):
+    x, y, _, _ = rect
+    return x + dx, y + dy
+
+
+class AgentTest(IsolatedState):
+    def setUp(self):
+        super().setUp()
+        self.app = DemoApp(self.tmp)
+        self.client = AgentClient("127.0.0.1", self.app.port, TOKEN, timeout=5)
+
+    def tearDown(self):
+        self.client.close()
+        self.app.stop()
+        super().tearDown()
+
+    def test_rejects_wrong_token(self):
+        bad = AgentClient("127.0.0.1", self.app.port, "wrong-token-wrong-token", timeout=5)
+        with self.assertRaisesRegex(PbtkError, "refused the token"):
+            bad.ping()
+
+    def test_rejects_commands_before_auth(self):
+        with socket.create_connection(("127.0.0.1", self.app.port), timeout=3) as s:
+            s.sendall(b"shot\n")
+            self.assertTrue(s.recv(100).startswith(b"err auth required"))
+
+    def test_info(self):
+        info = self.client.info()
+        self.assertEqual(info["app"], "pbtk-demo")
+        self.assertEqual((info["width"], info["height"], info["depth"]), ("758", "1024", "8"))
+        self.assertEqual(info["model"], "host-stub")
+
+    def test_shot_tap_changes_pixels(self):
+        x, y = inside(BUTTON1)
+        before = self.client.shot()
+        self.assertEqual((before.width, before.height), (758, 1024))
+        self.assertEqual(before.at(x, y), 255)
+        r = self.client.tap(*inside(BUTTON1, 150, 120))
+        self.assertEqual(r.get("dispatched"), "1")
+        after = self.client.shot()
+        self.assertEqual(after.at(x, y), 0, "button 1 should be filled black after a tap")
+        self.assertEqual(after.at(*inside(BUTTON2)), 255, "button 2 untouched")
+
+    def test_keys_select_and_toggle(self):
+        self.client.key("next")  # select button 2
+        self.client.key("ok")    # toggle it
+        img = self.client.shot()
+        self.assertEqual(img.at(*inside(BUTTON2)), 0)
+        self.assertEqual(img.at(*inside(BUTTON1)), 255)
+
+    def test_unknown_key_and_command(self):
+        with self.assertRaisesRegex(PbtkError, "unknown key"):
+            self.client.key("nope")
+        with self.assertRaisesRegex(PbtkError, "unknown command"):
+            self.client.request("frobnicate")
+
+    def test_log_offsets(self):
+        self.client.tap(*inside(BUTTON1, 150, 120))
+        data, nxt = self.client.log(0)
+        self.assertIn(b"demo: tap 1 -> on", data)
+        self.assertIn(b"pbagent: listening", data)
+        more, nxt2 = self.client.log(nxt)
+        self.assertEqual(more, b"")
+        self.assertEqual(nxt2, nxt)
+        tail, _ = self.client.log(-10)
+        self.assertEqual(len(tail), 10)
+
+    def test_long_press_and_swipe(self):
+        self.client.long_press(*inside(BUTTON2, 150, 120))
+        data, _ = self.client.log(0)
+        self.assertIn(b"long press on 2", data)
+        r = self.client.swipe(100, 900, 600, 900, 200)
+        self.assertEqual(r.get("dispatched"), "1")
+
+    def test_injected_events_are_not_reported_as_user_input(self):
+        self.client.tap(10, 10)
+        events, nxt = self.client.events(0)
+        self.assertEqual([e for e in events if e["type"].startswith("pointer")], [])
+        self.assertGreaterEqual(nxt, 0)
+
+    def test_files_inside_bundle_only(self):
+        p = str(self.app.dir / "note.txt")
+        self.client.put(p, b"hello\n")
+        self.assertEqual(self.client.get(p), b"hello\n")
+        names = [e["name"] for e in self.client.ls(str(self.app.dir))]
+        self.assertIn("note.txt", names)
+        with self.assertRaisesRegex(PbtkError, "path not allowed"):
+            self.client.get("/etc/passwd")
+        with self.assertRaisesRegex(PbtkError, "path not allowed"):
+            self.client.get(str(self.app.dir) + "/../../etc/passwd")
+        # The connection is still usable after a rejected put (payload was consumed).
+        with self.assertRaisesRegex(PbtkError, "path not allowed"):
+            self.client.put("/etc/pbtk-test", b"x" * 1000)
+        self.client.ping()
+
+    def test_several_clients(self):
+        others = [AgentClient("127.0.0.1", self.app.port, TOKEN, timeout=5) for _ in range(3)]
+        try:
+            for o in others:
+                o.ping()
+            self.client.ping()
+        finally:
+            for o in others:
+                o.close()
+
+    def test_exit_closes_app(self):
+        self.client.exit_app()
+        self.app.proc.wait(5)
+        self.assertEqual(self.app.proc.returncode, 0)
+        self.assertIn(b"demo: exit", self.app.log.read_bytes())
+
+    def test_device_facade_records_activity_and_shot(self):
+        d = Device(source="mcp", agent_addr=self.app.address, discover_timeout=0)
+        _, img, path = d.tap(*inside(BUTTON1, 150, 120), shot_after=True, settle_ms=50)
+        self.assertTrue(path.exists())
+        self.assertEqual(img.at(*inside(BUTTON1)), 0)
+        entries, _ = activity.read(0)
+        self.assertEqual(entries[-1]["source"], "mcp")
+        self.assertEqual(entries[-1]["action"], "tap")
+        self.assertEqual(entries[-1]["shot"], path.name)
+        d.close()
+
+    def test_hold_blocks_non_gui_sources(self):
+        activity.set_hold(True)
+        try:
+            d = Device(source="mcp", agent_addr=self.app.address, discover_timeout=0)
+            with self.assertRaisesRegex(PbtkError, "taken control"):
+                d.tap(1, 1)
+            g = Device(source="gui", agent_addr=self.app.address, discover_timeout=0)
+            g.tap(1, 1)
+            d.close()
+            g.close()
+        finally:
+            activity.set_hold(False)
+
+
+class BeaconTest(IsolatedState):
+    def test_discovery_hears_beacon(self):
+        from pbtk.agent import discover
+
+        app = DemoApp(self.tmp)
+        try:
+            # Beacons go to the broadcast address on the agent's port.
+            found = discover(timeout=4.0, port=app.port)
+        finally:
+            app.stop()
+        if not found:
+            self.skipTest("no broadcast delivery in this environment")
+        self.assertEqual(found[0].app, "pbtk-demo")
+        self.assertEqual(found[0].port, app.port)
+
+
+if __name__ == "__main__":
+    unittest.main()
