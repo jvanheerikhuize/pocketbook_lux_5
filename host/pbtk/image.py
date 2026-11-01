@@ -31,6 +31,25 @@ class Gray:
                 out[row + nx] = src[(h - 1 - nx) * w + ny]
         return Gray(h, w, bytes(out))
 
+    def rotate_ccw(self) -> "Gray":
+        """Rotate 90° counter-clockwise."""
+        w, h, src = self.width, self.height, self.pixels
+        out = bytearray(w * h)
+        for ny in range(w):  # new height = old width
+            row = ny * h
+            col = w - 1 - ny
+            for nx in range(h):  # new width = old height
+                out[row + nx] = src[nx * w + col]
+        return Gray(h, w, bytes(out))
+
+    def turned(self, view: str) -> "Gray":
+        """As seen in `view` (none, cw, ccw); see Device.view."""
+        if view == "cw":
+            return self.rotate_cw()
+        if view == "ccw":
+            return self.rotate_ccw()
+        return self
+
 
 def parse_pgm(data: bytes) -> Gray:
     """Parse a binary (P5) PGM with maxval 255, as the agent sends."""

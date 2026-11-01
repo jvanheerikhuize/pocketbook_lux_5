@@ -99,7 +99,10 @@ you switch it off.
    log   = "mmiv/mmiv.log"          # relative to applications/
    build = "make pocketbook"
    keep  = ["mmiv/saves/*"]         # copied only when missing: never overwrite saves
+   view  = "ccw"                    # landscape app on the portrait panel: upright screenshots
    ```
+   `view` (or `--view`, `$PBTK_VIEW`) turns app screenshots in the CLI, GUI and
+   MCP; taps and swipes then take coordinates in the turned picture.
 4. **Claude Code** — `.mcp.json` in that repo:
    ```json
    {"mcpServers": {"pocketbook": {"command": "pbtk", "args": ["mcp"]}}}

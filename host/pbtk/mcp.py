@@ -35,8 +35,8 @@ def _tool(name, description, props=None, required=None):
 TOOLS = [
     _tool("pb_status", "What is reachable: USB storage (deploy/logs) and the in-app agent (screen/input). "
           "Also says whether the user has taken control in the GUI."),
-    _tool("pb_screenshot", "Screenshot of the app running on the PocketBook (8-bit gray PNG, canvas coordinates "
-          "match pb_tap). whole=true captures the panel itself from /dev/fb0, so firmware menus, "
+    _tool("pb_screenshot", "Screenshot of the app running on the PocketBook (8-bit gray PNG; its coordinates "
+          "are what pb_tap/pb_swipe take, also when pbtk.toml turns it upright with `view`). whole=true captures the panel itself from /dev/fb0, so firmware menus, "
           "InkView dialogs and the on-screen keyboard are included.",
           {"whole": {"type": "boolean", "default": False},
            "rotate": {"type": "string", "enum": ["auto", "raw", "cw", "ccw"], "default": "auto"}}),

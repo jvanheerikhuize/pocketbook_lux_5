@@ -10,3 +10,6 @@ build = "make pocketbook"
 # Files (globs relative to dist) copied only when the reader does not have
 # them yet, e.g. saves or settings the user changes on the device.
 # keep = ["pbtk-demo/saves/*"]
+# A landscape app drawn turned on the portrait panel: show screenshots upright
+# (none, cw, ccw); taps then use the same turned coordinates.
+# view = "ccw"

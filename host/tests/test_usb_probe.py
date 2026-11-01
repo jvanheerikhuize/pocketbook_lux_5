@@ -34,6 +34,16 @@ class ImageTest(unittest.TestCase):
         g = Gray(3, 2, b"abcdef").rotate_cw()
         self.assertEqual((g.width, g.height, g.pixels), (2, 3, b"daebfc"))
 
+    def test_rotate_ccw(self):
+        # 3x2:  a b c      rotated:  c f
+        #       d e f                b e
+        #                            a d
+        g = Gray(3, 2, b"abcdef").rotate_ccw()
+        self.assertEqual((g.width, g.height, g.pixels), (2, 3, b"cfbead"))
+        big = Gray(5, 3, bytes(range(15)))
+        self.assertEqual(big.rotate_ccw().pixels, big.rotate_cw().rotate_cw().rotate_cw().pixels)
+        self.assertIs(big.turned("none"), big)
+
     def test_framebuffer_formats(self):
         self.assertEqual(from_framebuffer(bytes([1, 2, 0, 3, 4, 0]), 2, 2, 8, 3).pixels, bytes([1, 2, 3, 4]))
         white32 = bytes([255, 255, 255, 0]) * 2

@@ -15,7 +15,8 @@ from .device import Device
 
 
 def _dev(args, source="cli") -> Device:
-    return Device(source=source, agent_addr=args.agent, discover_timeout=args.discover)
+    return Device(source=source, agent_addr=args.agent, discover_timeout=args.discover,
+                  view=getattr(args, "view", None))
 
 
 def cmd_status(args):
@@ -265,6 +266,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="pbtk", description="PocketBook toolkit")
     p.add_argument("--version", action="version", version=__version__)
     p.add_argument("--agent", help="agent HOST[:PORT] (default: $PBTK_AGENT, last seen, or discovery)")
+    p.add_argument("--view", choices=["none", "cw", "ccw"],
+                   help="turn app screenshots; taps use the same coordinates "
+                        "(default: $PBTK_VIEW or `view` in pbtk.toml)")
     p.add_argument("--discover", type=float, default=4.0, help="seconds to listen for agents (0 = never)")
     sub = p.add_subparsers(dest="cmd", required=True)
 

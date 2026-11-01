@@ -3,12 +3,13 @@ so every action lands on the same activity timeline."""
 
 from __future__ import annotations
 
+import os
 import subprocess
 import time
 import zlib
 from pathlib import Path
 
-from . import PbtkError, activity, agent as agent_mod, paths
+from . import PbtkError, activity, agent as agent_mod, paths, project as project_mod
 from .image import Gray
 from .project import Project
 from .usb import UsbStorage, find_mount
@@ -19,8 +20,10 @@ class Device:
     apps_root = "/mnt/ext1/applications"
 
     def __init__(self, source: str = "cli", agent_addr: str | None = None,
-                 discover_timeout: float = 4.0):
+                 discover_timeout: float = 4.0, view: str | None = None):
         self.source = source
+        self._view = view
+        self._canvas: tuple[int, int] | None = None
         self._agent_addr = agent_addr
         self._discover_timeout = discover_timeout
         self._agent: agent_mod.AgentClient | None = None
@@ -54,6 +57,38 @@ class Device:
         if self._agent:
             self._agent.close()
 
+    # --------------------------------------------------------------- view
+    @property
+    def view(self) -> str:
+        """How app screenshots are turned: none, cw or ccw. A landscape app on the
+        portrait panel (mmIV) reads upright with one; taps, long presses and
+        swipes take coordinates in the same turned picture. From the argument,
+        $PBTK_VIEW, or `view` in the nearest pbtk.toml."""
+        if self._view is None:
+            v = os.environ.get("PBTK_VIEW")
+            if not v:
+                try:
+                    v = project_mod.load().view
+                except PbtkError:
+                    v = "none"
+            self._view = project_mod._view(v, "PBTK_VIEW")
+        return self._view
+
+    def _canvas_size(self) -> tuple[int, int]:
+        if self._canvas is None:
+            info = self.agent.info()
+            self._canvas = (int(info["width"]), int(info["height"]))
+        return self._canvas
+
+    def to_canvas(self, x: int, y: int) -> tuple[int, int]:
+        """A point in the (turned) screenshot → the app canvas the agent taps."""
+        if self.view == "none":
+            return x, y
+        w, h = self._canvas_size()
+        if self.view == "ccw":
+            return w - 1 - y, x
+        return y, h - 1 - x  # cw
+
     # ------------------------------------------------------------ helpers
     def _guard(self) -> None:
         if self.source != "gui" and activity.held():
@@ -84,7 +119,7 @@ class Device:
     def screenshot(self, record: bool = True, out: Path | None = None, whole: bool = False,
                    rotate: str = "auto") -> tuple[Gray, Path]:
         """The app canvas, or with whole=True the panel itself (/dev/fb0)."""
-        img = self.agent.fbshot(rotate) if whole else self.agent.shot()
+        img = self.agent.fbshot(rotate) if whole else self.agent.shot().turned(self.view)
         name = time.strftime("%Y%m%d-%H%M%S") + f"-{int(time.time() * 1000) % 1000:03d}.png"
         path = Path(out) if out else paths.shots_dir() / name
         path.write_bytes(img.png())
@@ -96,16 +131,18 @@ class Device:
 
     # -------------------------------------------------------------- input
     def tap(self, x: int, y: int, shot_after: bool = False, settle_ms: int = 400):
-        return self._act("tap", {"x": x, "y": y}, lambda: self.agent.tap(x, y), shot_after, settle_ms)
+        return self._act("tap", {"x": x, "y": y}, lambda: self.agent.tap(*self.to_canvas(x, y)),
+                         shot_after, settle_ms)
 
     def long_press(self, x: int, y: int, shot_after: bool = False, settle_ms: int = 400):
-        return self._act("long", {"x": x, "y": y}, lambda: self.agent.long_press(x, y),
+        return self._act("long", {"x": x, "y": y}, lambda: self.agent.long_press(*self.to_canvas(x, y)),
                          shot_after, settle_ms)
 
     def swipe(self, x1: int, y1: int, x2: int, y2: int, ms: int = 300, shot_after: bool = False,
               settle_ms: int = 400):
         return self._act("swipe", {"x1": x1, "y1": y1, "x2": x2, "y2": y2, "ms": ms},
-                         lambda: self.agent.swipe(x1, y1, x2, y2, ms), shot_after, settle_ms)
+                         lambda: self.agent.swipe(*self.to_canvas(x1, y1), *self.to_canvas(x2, y2), ms),
+                         shot_after, settle_ms)
 
     def key(self, name: str, shot_after: bool = False, settle_ms: int = 400):
         name = name.lower()

@@ -21,6 +21,8 @@ class Project:
     build: str | None
     #: globs (relative to dist, e.g. "mmiv/saves/*") only copied when missing on the reader
     keep: list[str] = field(default_factory=list)
+    #: how app screenshots are turned (none, cw, ccw); taps use the same coordinates
+    view: str = "none"
 
     def kept(self, rel: str) -> bool:
         return any(fnmatch.fnmatchcase(rel, pat) for pat in self.keep)
@@ -28,6 +30,15 @@ class Project:
     @property
     def device_log(self) -> str | None:
         return self.log
+
+
+VIEWS = ("none", "cw", "ccw")
+
+
+def _view(v: str, where) -> str:
+    if v not in VIEWS:
+        raise PbtkError(f"{where}: view must be one of {', '.join(VIEWS)}")
+    return v
 
 
 def find(start: Path | None = None) -> Path | None:
@@ -62,4 +73,5 @@ def load(path_or_dir: Path | str | None = None) -> Project:
         log=log,
         build=app.get("build"),
         keep=list(app.get("keep") or []),
+        view=_view(app.get("view", "none"), p),
     )
