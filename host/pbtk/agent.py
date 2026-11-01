@@ -232,6 +232,10 @@ class AgentClient:
     def event(self, type_: int, p1: int = 0, p2: int = 0) -> dict:
         return self.request(f"event {int(type_)} {int(p1)} {int(p2)}")[0]
 
+    def calibrate(self, on: bool = True) -> dict:
+        """Draw the calibration pattern on the panel (on=False: let the app repaint)."""
+        return self.request("calibrate" if on else "calibrate off")[0]
+
     def refresh(self) -> None:
         self.request("refresh")
 

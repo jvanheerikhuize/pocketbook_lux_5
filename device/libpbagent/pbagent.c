@@ -44,6 +44,30 @@
 /* Pseudo event types the main thread handles itself. */
 #define Q_FULLUPDATE (-1)
 #define Q_CLOSEAPP (-2)
+#define Q_CALIBRATE (-3)
+
+/* Calibration pattern: shows on the panel itself where the canvas edges land.
+ * Black bars along the top and bottom (CAL_BAR px), thin black edges left and
+ * right, and ruler blocks every 100 px down the left side whose width grows
+ * with the hundred (1 block at 100, 2 at 200, ...), so offsets can be read
+ * off both the panel and a screenshot. */
+#define CAL_BAR 50
+
+static void draw_calibration(void) {
+    int w = ScreenWidth(), h = ScreenHeight();
+    FillArea(0, 0, w, h, WHITE);
+    FillArea(0, 0, w, CAL_BAR, BLACK);
+    FillArea(0, h - CAL_BAR, w, CAL_BAR, BLACK);
+    FillArea(0, 0, 6, h, BLACK);
+    FillArea(w - 6, 0, 6, h, BLACK);
+    for (int y = 100; y < h - CAL_BAR; y += 100) {
+        FillArea(6, y, w - 12, 2, LGRAY);     /* faint rule across */
+        FillArea(20, y - 10, 24 * (y / 100), 20, BLACK); /* n blocks at n*100 */
+        for (int k = 1; k < y / 100; k++) FillArea(20 + 24 * k - 3, y - 10, 3, 20, WHITE);
+    }
+    for (int y = 25; y < h - CAL_BAR; y += 25) FillArea(w - 40, y, 34, 2, BLACK); /* ticks */
+    FullUpdate();
+}
 
 typedef struct {
     long due_ms;
@@ -172,6 +196,10 @@ static void dispatch(const qitem *it) {
     }
     if (it->type == Q_CLOSEAPP) {
         CloseApp();
+        return;
+    }
+    if (it->type == Q_CALIBRATE) {
+        draw_calibration();
         return;
     }
     iv_handler h = GetEventHandler();
@@ -834,6 +862,12 @@ static int handle(int fd, char *line) {
     if (!strcmp(cmd, "event") && argc >= 2) {
         qitem q[1] = {{0, 0, ARGI(1, 0), ARGI(2, 0), ARGI(3, 0)}};
         if (q[0].type < 0) return reply_err(fd, "bad event type");
+        return inject(fd, q, 1);
+    }
+    if (!strcmp(cmd, "calibrate")) {
+        /* `calibrate` draws the pattern; `calibrate off` asks the app to repaint (EVT_SHOW). */
+        int off = argc > 1 && !strcmp(argv[1], "off");
+        qitem q[1] = {{0, 0, off ? EVT_SHOW : Q_CALIBRATE, 0, 0}};
         return inject(fd, q, 1);
     }
     if (!strcmp(cmd, "refresh")) {

@@ -148,6 +148,16 @@ def cmd_fbinfo(args):
         print(f"{k:<15} {v}")
 
 
+def cmd_calibrate(args):
+    d = _dev(args)
+    d._guard()
+    d.agent.calibrate(not args.off)
+    activity.record("cli", "calibrate", {"on": not args.off})
+    if not args.off:
+        print("calibration pattern on the panel: black bars along the canvas top and bottom (50 px),")
+        print("ruler blocks every 100 px (n blocks at n*100). `pbtk calibrate --off` restores the app.")
+
+
 def cmd_shot(args):
     img, path = _dev(args).screenshot(out=Path(args.output) if args.output else None,
                                       whole=args.whole, rotate=args.rotate)
@@ -275,6 +285,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--timeout", type=float, default=6.0)
     add("info", cmd_info, "running app and screen, via agent")
     add("fbinfo", cmd_fbinfo, "framebuffer geometry from the driver (for `shot --whole`)")
+    sp = add("calibrate", cmd_calibrate, "draw an edge/ruler pattern on the panel to check alignment")
+    sp.add_argument("--off", action="store_true", help="let the app repaint itself")
     sp = add("shot", cmd_shot, "screenshot of the running app (PNG)")
     sp.add_argument("-o", "--output")
     sp.add_argument("-w", "--whole", action="store_true",

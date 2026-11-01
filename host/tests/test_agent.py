@@ -103,6 +103,20 @@ class AgentTest(IsolatedState):
         self.assertEqual(info["line_length"], "8")
         self.assertEqual(info["xoffset"], "0")
 
+    def test_calibrate_pattern_and_restore(self):
+        self.assertEqual(self.client.calibrate().get("dispatched"), "1")
+        img = self.client.shot()
+        h = img.height
+        self.assertEqual([img.at(300, y) for y in (0, 49, 50)], [0, 0, 255], "top bar is rows 0-49")
+        self.assertEqual([img.at(300, y) for y in (h - 51, h - 50, h - 1)], [255, 0, 0], "bottom bar")
+        self.assertEqual(img.at(0, 500), 0, "left edge")
+        # 3 ruler blocks at y=300: three black runs starting at x=20.
+        row = [img.at(x, 300) for x in range(10, 120)]
+        runs = sum(1 for i in range(1, len(row)) if row[i] == 0 and row[i - 1] != 0)
+        self.assertEqual(runs, 3)
+        self.client.calibrate(False)
+        self.assertEqual(self.client.shot().at(300, 10), 255, "app repainted")
+
     def test_fbshot_missing_device(self):
         self.app.fb.unlink()
         with self.assertRaisesRegex(PbtkError, "read .*fb0"):
