@@ -84,6 +84,8 @@ static void poll_user_input(void) {
     unlink(path);
 }
 
+static void deliver_sent(void);
+
 void InkViewMain(iv_handler h) {
     ensure_canvas();
     signal(SIGINT, on_signal);
@@ -99,6 +101,7 @@ void InkViewMain(iv_handler h) {
                 iv_timerproc p = timers[i].proc;
                 timers[i].proc = NULL; /* one-shot, as in InkView */
                 p();
+                deliver_sent();
             }
         }
         poll_user_input();
@@ -118,8 +121,27 @@ iv_handler SetEventHandler(iv_handler h) {
 
 iv_handler GetEventHandler(void) { return current; }
 
+/* As on the reader, SendEvent() only queues: the handler runs from the main
+ * loop after the current timer callback has returned. */
+#define MAX_SENT 256
+static struct {
+    iv_handler h;
+    int type, p1, p2;
+} sent[MAX_SENT];
+static int sent_count;
+
 void SendEvent(iv_handler h, int type, int par1, int par2) {
-    if (h) h(type, par1, par2);
+    if (!h || sent_count == MAX_SENT) return;
+    sent[sent_count].h = h;
+    sent[sent_count].type = type;
+    sent[sent_count].p1 = par1;
+    sent[sent_count].p2 = par2;
+    sent_count++;
+}
+
+static void deliver_sent(void) {
+    for (int i = 0; i < sent_count; i++) sent[i].h(sent[i].type, sent[i].p1, sent[i].p2);
+    sent_count = 0;
 }
 
 void SetHardTimer(const char *name, iv_timerproc proc, int ms) {

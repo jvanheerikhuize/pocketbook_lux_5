@@ -160,9 +160,13 @@ class AgentTest(IsolatedState):
         self.assertEqual(r.get("dispatched"), "1")
 
     def test_injected_events_are_not_reported_as_user_input(self):
+        # The stub's SendEvent queues like the reader's: the handler (and
+        # pbagent_observe) runs after the agent's timer callback returns.
         self.client.tap(10, 10)
+        self.client.swipe(100, 900, 600, 900, 200)
+        self.client.key("next")
         events, nxt = self.client.events(0)
-        self.assertEqual([e for e in events if e["type"].startswith("pointer")], [])
+        self.assertEqual([e for e in events if e["type"].startswith(("pointer", "key"))], [])
         self.assertGreaterEqual(nxt, 0)
 
     def test_files_inside_bundle_only(self):
