@@ -279,6 +279,19 @@ class ScenarioTest(IsolatedState):
             self.run_script(f"tap {x + 10} {y + 10}\nexpect-change 500\n")
         self.assertFalse(self.steps[-1]["ok"])
 
+    def test_settle_waits_for_a_quiet_panel(self):
+        self.change_panel_after(0.3)
+        self.change_panel_after(0.6)
+        self.run_script("settle 400 5000\n")
+        self.assertGreaterEqual(self.steps[0]["ms"], 550)  # the last change
+        self.assertLess(self.steps[0]["ms"], 2000)
+
+    def test_settle_fails_on_a_busy_panel(self):
+        for k in range(1, 12):
+            self.change_panel_after(0.1 * k)
+        with self.assertRaisesRegex(PbtkError, "kept changing for 600 ms"):
+            self.run_script("settle 300 600\n")
+
     def test_expect_screen_and_differs(self):
         x, y, w, h = BUTTON1
         box = f"{x} {y} {w} {h}"

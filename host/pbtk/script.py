@@ -7,6 +7,10 @@ One command per line; `#` starts a comment:
     expect-log TEXT    (waits up to 10 s for TEXT to appear in the app log)
     expect-change [MS] (waits up to MS, default 4000, for the panel to change
                         after the last input; the time it took is reported)
+    settle [QUIET_MS] [MAX_MS]
+                       (waits until the panel has not changed for QUIET_MS,
+                        default 600, at most MAX_MS, default 10000: use it
+                        before a shot so it never catches a half-drawn screen)
     expect-screen REF [MAX_PCT] [X Y W H]
                        (the screen, or that box of it, matches REF: a `shot`
                         name from this run or a PNG file; at most MAX_PCT,
@@ -137,6 +141,21 @@ def run(dev: Device, text: str, out_dir: Path | None = None, echo=print,
                     time.sleep(0.05)
                 step["ms"] = round((time.monotonic() - sent) * 1000)
                 echo(f"     panel changed after {step['ms']} ms")
+            elif cmd == "settle":
+                quiet = int(args[0]) / 1000 if args else 0.6
+                limit = int(args[1]) if len(args) > 1 else 10000
+                start = time.monotonic()
+                last = dev.agent.fbshot("raw").pixels
+                still_since = start
+                while time.monotonic() - still_since < quiet:
+                    if time.monotonic() - start > limit / 1000:
+                        raise PbtkError(f"line {n}: the panel kept changing for {limit} ms")
+                    time.sleep(0.05)
+                    now = dev.agent.fbshot("raw").pixels
+                    if now != last:
+                        last, still_since = now, time.monotonic()
+                step["ms"] = round((still_since - start) * 1000)
+                echo(f"     panel settled after {step['ms']} ms")
             elif cmd in ("expect-screen", "expect-differs"):
                 ref_path = Path(args[0]) if args[0].endswith(".png") else (out_dir or Path(".")) / f"{args[0]}.png"
                 if not ref_path.exists():
