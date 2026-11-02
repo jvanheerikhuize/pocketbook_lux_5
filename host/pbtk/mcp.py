@@ -38,9 +38,9 @@ TOOLS = [
           "Also says whether the user has taken control in the GUI."),
     _tool("pb_screenshot", "Screenshot of the app running on the PocketBook (8-bit gray PNG; its coordinates "
           "are what pb_tap/pb_swipe take, also when pbtk.toml turns it upright with `view`). whole=true captures the panel itself from /dev/fb0, so firmware menus, "
-          "InkView dialogs and the on-screen keyboard are included.",
+          "InkView dialogs and the on-screen keyboard are included. It follows view unless rotate is specified.",
           {"whole": {"type": "boolean", "default": False},
-           "rotate": {"type": "string", "enum": ["auto", "raw", "cw", "ccw"], "default": "auto"}}),
+           "rotate": {"type": "string", "enum": ["auto", "raw", "cw", "ccw"]}}),
     _tool("pb_info", "Running app, screen size, orientation, firmware, agent version."),
     _tool("pb_tap", "Tap at a screen point in the running app.", {**_XY, **_SHOT}, ["x", "y"]),
     _tool("pb_long_press", "Long-press at a screen point.", {**_XY, **_SHOT}, ["x", "y"]),
@@ -115,7 +115,7 @@ class Server:
             return [_text(json.dumps(d.status(), indent=2))]
         if name == "pb_screenshot":
             whole = bool(a.get("whole", False))
-            img, path = d.screenshot(whole=whole, rotate=a.get("rotate", "auto"))
+            img, path = d.screenshot(whole=whole, rotate=a.get("rotate"))
             what = "whole screen" if whole else "app canvas"
             return [_text(f"{what} {img.width}x{img.height} ({path})"), _image(img.png())]
         if name == "pb_info":

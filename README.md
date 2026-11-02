@@ -101,7 +101,8 @@ you switch it off.
    keep  = ["mmiv/saves/*"]         # copied only when missing: never overwrite saves
    view  = "ccw"                    # landscape app on the portrait panel: upright screenshots
    ```
-   `view` (or `--view`, `$PBTK_VIEW`) turns app screenshots in the CLI, GUI and
+   For whole-screen shots, an explicit `--rotate` (MCP: `rotate`) overrides `view`.
+   `view` (or `--view`, `$PBTK_VIEW`) turns app and whole-screen screenshots in the CLI, GUI and
    MCP; taps and swipes then take coordinates in the turned picture.
 4. **Claude Code** — `.mcp.json` in that repo:
    ```json

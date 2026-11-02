@@ -322,8 +322,8 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("-o", "--output")
     sp.add_argument("-w", "--whole", action="store_true",
                     help="whole panel from /dev/fb0 (firmware UI, dialogs, keyboard), not just the app canvas")
-    sp.add_argument("--rotate", choices=["auto", "raw", "cw", "ccw"], default="auto",
-                    help="with --whole: auto = portrait as held (default)")
+    sp.add_argument("--rotate", choices=["auto", "raw", "cw", "ccw"],
+                    help="with --whole: override view; auto = portrait as held (default: auto followed by view)")
     for name, fn, coords in (("tap", cmd_tap, ["x", "y"]), ("long", cmd_long, ["x", "y"])):
         sp = add(name, fn, f"{name} at screen coordinates")
         for c in coords:

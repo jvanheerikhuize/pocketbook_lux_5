@@ -126,7 +126,7 @@ def make_handler(app: App):
                     a = app.agent()
                     if not a:
                         return self._json({"error": "no agent"}, 503)
-                    img = a.fbshot() if q.get("whole") == "1" else a.shot().turned(app.dev.view)
+                    img = (a.fbshot() if q.get("whole") == "1" else a.shot()).turned(app.dev.view)
                     return self._send(200, img.png(), "image/png",
                                       {"X-Width": str(img.width), "X-Height": str(img.height)})
                 if u.path.startswith("/api/shots/"):
