@@ -183,6 +183,8 @@ int GetPanelType(void) { return panel_type; }
 int PanelHeight(void) { return panel_type ? 75 : 0; }
 int PanelHeightFBOffset(void) { return panel_type ? 75 : 0; }
 
+void BanSleep(int sec) { fprintf(stderr, "stub: BanSleep(%d)\n", sec); }
+
 int NetConnect(const char *name) {
     (void)name;
     return 0;

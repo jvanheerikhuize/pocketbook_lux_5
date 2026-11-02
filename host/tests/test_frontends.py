@@ -13,13 +13,13 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from pbtk import activity, script
+from pbtk import PbtkError, activity, script
 from pbtk.device import Device
 from pbtk.gui.server import make_server
 from pbtk.image import png_size
 from pbtk.mcp import Server, serve
 
-from support import BUTTON1, ROOT, DemoApp, IsolatedState
+from support import BUTTON1, BUTTON2, ROOT, DemoApp, IsolatedState
 
 
 class GuiTest(IsolatedState):
@@ -224,6 +224,101 @@ class ScriptTest(IsolatedState):
             d.close()
         finally:
             app.stop()
+
+
+class ScenarioTest(IsolatedState):
+    """The scenario commands of pbtk run, against the demo app's real agent."""
+
+    def setUp(self):
+        super().setUp()
+        self.app = DemoApp(self.tmp)
+        self.dev = Device(source="script", agent_addr=self.app.address, discover_timeout=0)
+
+    def tearDown(self):
+        self.dev.close()
+        self.app.stop()
+        super().tearDown()
+
+    def run_script(self, text, **kw):
+        steps = []
+        try:
+            script.run(self.dev, text, self.tmp / "out", echo=lambda *_: None, report=steps, **kw)
+        finally:
+            self.steps = steps
+
+    def change_panel_after(self, seconds):
+        """The fake framebuffer changes a little later, as the panel would."""
+        def later():
+            time.sleep(seconds)
+            data = bytearray(self.app.fb.read_bytes())
+            data[0] ^= 0xFF
+            self.app.fb.write_bytes(bytes(data))
+        threading.Thread(target=later, daemon=True).start()
+
+    def test_note_write_and_key_hold(self):
+        path = str(self.app.dir / "setting.txt")
+        self.run_script(f"note step one\nwrite {path} portrait\nkey next 300\n")
+        self.assertEqual((self.app.dir / "setting.txt").read_text(), "portrait\n")
+        entries, _ = activity.read(0)
+        actions = [(e["action"], e["args"]) for e in entries]
+        self.assertIn(("note", {"text": "step one"}), actions)
+        self.assertIn(("key", {"name": "next", "hold_ms": 300}), actions)
+        self.assertIn("key next 300", script.to_script(entries))
+        self.assertTrue(all(s["ok"] for s in self.steps))
+
+    def test_expect_change_reports_latency(self):
+        x, y, _, _ = BUTTON1
+        self.change_panel_after(0.8)  # counted from the tap being handled (< 0.4 s)
+        self.run_script(f"tap {x + 10} {y + 10}\nexpect-change 3000\n")
+        self.assertGreaterEqual(self.steps[1]["ms"], 400)
+        self.assertLess(self.steps[1]["ms"], 3000)
+
+    def test_expect_change_fails_when_nothing_changes(self):
+        x, y, _, _ = BUTTON1
+        with self.assertRaisesRegex(PbtkError, "did not change within 500 ms"):
+            self.run_script(f"tap {x + 10} {y + 10}\nexpect-change 500\n")
+        self.assertFalse(self.steps[-1]["ok"])
+
+    def test_settle_waits_for_a_quiet_panel(self):
+        self.change_panel_after(0.3)
+        self.change_panel_after(0.6)
+        self.run_script("settle 400 5000\n")
+        self.assertGreaterEqual(self.steps[0]["ms"], 550)  # the last change
+        self.assertLess(self.steps[0]["ms"], 2000)
+
+    def test_settle_fails_on_a_busy_panel(self):
+        for k in range(1, 12):
+            self.change_panel_after(0.1 * k)
+        with self.assertRaisesRegex(PbtkError, "kept changing for 600 ms"):
+            self.run_script("settle 300 600\n")
+
+    def test_expect_screen_and_differs(self):
+        x, y, w, h = BUTTON1
+        box = f"{x} {y} {w} {h}"
+        self.run_script("shot before\nexpect-screen before\n")
+        self.assertEqual(self.steps[1]["diff_pct"], 0)
+        # Tapping button 1 fills it: that box differs, button 2 does not.
+        x2, y2, w2, h2 = BUTTON2
+        self.run_script(f"tap {x + 10} {y + 10}\nwait 300\nexpect-differs before 50 {box}\n"
+                        f"expect-screen before 0 {x2} {y2} {w2} {h2}\n")
+        with self.assertRaisesRegex(PbtkError, "differs from before.png"):
+            self.run_script(f"expect-screen before 1 {box}\n")
+        with self.assertRaisesRegex(PbtkError, "no reference screen"):
+            self.run_script("expect-screen nothing\n")
+
+    def test_stops_when_the_player_touches_the_reader(self):
+        x, y, _, _ = BUTTON1
+        # Our own taps do not count as the player's ...
+        self.run_script(f"tap {x + 10} {y + 10}\ntap {x + 20} {y + 20}\n", stop_on_user=True)
+        # ... a real touch between two steps does.
+        def touch_later():
+            time.sleep(0.3)
+            self.app.user_input("tap 300 400\n")
+        threading.Thread(target=touch_later, daemon=True).start()
+        with self.assertRaisesRegex(PbtkError, "player used the reader"):
+            self.run_script(f"tap {x + 10} {y + 10}\nwait 1000\ntap {x + 20} {y + 20}\n",
+                            stop_on_user=True)
+        self.assertEqual([s["ok"] for s in self.steps], [True, True, False])
 
 
 if __name__ == "__main__":

@@ -93,6 +93,8 @@ void SetOrientation(int n);
 char *GetDeviceModel(void);
 char *GetSoftwareVersion(void);
 int NetConnect(const char *name);
+/* No sleep for `sec` seconds (the stub logs it to stderr). */
+void BanSleep(int sec);
 
 /* Firmware status panel. On the reader it is on unless the app disables it,
  * and while on it shifts the app's picture on the panel by its height with

@@ -299,6 +299,30 @@ static void dispatch(const qitem *it) {
 
 static long started_ms;
 
+/* Keep the reader awake while a client is connected: injected input does not
+ * reset the firmware's idle timer, so a remote session used to end with the
+ * reader asleep and the app closed (pbtk #5). Re-armed every KEEP_AWAKE_MS;
+ * once the last client leaves, the ban runs out and the reader sleeps as usual. */
+#define KEEP_AWAKE_MS 20000
+#define KEEP_AWAKE_BAN_S 60
+
+static void keep_awake(void) {
+    static long last;
+    static int logged;
+    int clients;
+    pthread_mutex_lock(&A.qlock);
+    clients = A.clients;
+    pthread_mutex_unlock(&A.qlock);
+    long t = now_ms();
+    if (clients <= 0 || (last && t - last < KEEP_AWAKE_MS)) return;
+    last = t;
+    BanSleep(KEEP_AWAKE_BAN_S);
+    if (!logged) {
+        logged = 1;
+        pbagent_log("pbagent: keeping the reader awake while a client is connected");
+    }
+}
+
 /* Once, a few seconds in: the status panel silently moves the picture. */
 static void check_panel(void) {
     static int checked;
@@ -314,6 +338,7 @@ static void check_panel(void) {
 static void tick(void) {
     if (!A.running) return;
     check_panel();
+    keep_awake();
     /* Events sent last tick have been delivered by now (the firmware runs its
      * queue between timer callbacks): report them done, so a client's next
      * command (a screenshot) sees what the app made of them. */

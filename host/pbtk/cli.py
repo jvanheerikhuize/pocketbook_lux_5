@@ -210,7 +210,24 @@ def cmd_exit_app(args):
 
 def cmd_run(args):
     d = _dev(args, source="script")
-    shots = script.run(d, Path(args.file).read_text(), Path(args.out) if args.out else None)
+    out = Path(args.out) if args.out else None
+    steps: list[dict] = []
+    error = None
+    try:
+        shots = script.run(d, Path(args.file).read_text(), out, stop_on_user=args.stop_on_user,
+                           report=steps)
+    except PbtkError as e:
+        error, shots = str(e), []
+    if out:
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "report.json").write_text(json.dumps({"script": args.file, "ok": error is None,
+                                                     "error": error, "steps": steps}, indent=1))
+    changes = [s["ms"] for s in steps if "ms" in s]
+    if changes:
+        print(f"panel changes: {len(changes)}, {min(changes)}-{max(changes)} ms "
+              f"(median {sorted(changes)[len(changes) // 2]} ms)")
+    if error:
+        raise PbtkError(error)
     print(f"done; {len(shots)} screenshot(s)")
 
 
@@ -326,7 +343,9 @@ def build_parser() -> argparse.ArgumentParser:
     add("exit-app", cmd_exit_app, "close the running app")
     sp = add("run", cmd_run, "run an input script (see pbtk/script.py)")
     sp.add_argument("file")
-    sp.add_argument("--out", help="folder for `shot NAME` screenshots")
+    sp.add_argument("--out", help="folder for `shot NAME` screenshots and report.json")
+    sp.add_argument("--stop-on-user", action="store_true",
+                    help="stop when the player touches the reader or presses a key")
     sp = add("activity", cmd_activity, "recent actions on the shared timeline")
     sp.add_argument("-n", type=int, default=30)
     sp = add("gui", cmd_gui, "web GUI: live screen, controls, timeline, logs, files")
